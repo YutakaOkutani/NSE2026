@@ -1,79 +1,5 @@
 # NSE2026
 
-## ファイル構成
-
-```plaintext
-├── anlz/                               # ログ解析
-│   └── log_anlz.py
-├── csmn/                               # ミッション本体
-│   ├── __init__.py
-│   ├── arch_summary.md
-│   ├── const.py
-│   ├── ctrl.py
-│   ├── gps_util.py
-│   ├── nav.py
-│   ├── run.py
-│   ├── st.py
-│   ├── mgr/
-│   │   ├── __init__.py
-│   │   ├── hw_mgr.py
-│   │   ├── led_mgr.py
-│   │   ├── mtr_mgr.py
-│   │   └── sns_mgr.py
-│   └── phs/
-│       ├── __init__.py
-│       ├── base.py
-│       ├── p0.py
-│       ├── p1.py
-│       ├── p2.py
-│       ├── p3.py
-│       ├── p4.py
-│       ├── p5.py
-│       ├── p6.py
-│       └── p7.py
-├── runs/                               # 実行用スクリプト群
-│   ├── cam/
-│   │   ├── cam_capture_data.py
-│   │   ├── cam_detector_dbg.py
-│   │   ├── cam_relay_pc.py
-│   │   ├── cam_relay_sbc.py
-│   │   └── cam_relay_readme.md
-│   ├── diag/
-│   │   ├── gps.py
-│   │   ├── led.py
-│   │   ├── motor.py
-│   │   └── sensor.py
-│   ├── evt/
-│   │   ├── landing_impact.py
-│   │   └── open_parachute.py
-│   ├── orch/
-│   │   ├── orch_p0_log.py
-│   │   ├── orch_p1_p3.py
-│   │   ├── orch_p1_p7.py
-│   │   ├── orch_p2_p3.py
-│   │   ├── orch_p2_p7.py
-│   │   ├── orch_p3_p4.py
-│   │   └── orch_p4_p7.py
-│   └── spec/
-│       └── p0_detection.py
-├── lib/                                # センサー・画像処理ライブラリ
-│   ├── __init__.py
-│   ├── bmp180.py
-│   ├── bno055.py
-│   ├── capture_roi_img.py
-│   └── detect_corn.py
-├── gerber/                             # 基板設計データ
-│   └── NSE2026.zip
-├── .gitignore                          # Git管理から除外するファイルのリスト
-├── main.py                             # 本番用コード
-└── README.md                           # このファイル
-```
-
-* 構成のポイント
-  * テストコードのデバッグがそのまま本番コードのデバッグにつながるように、テストコードはできるだけ本番コードと同じ構成・呼び出しになるようにしている（例: フェーズ1からフェーズ7までのE2E試験用コードは、実際のミッションコードと同じ関数を呼び出す形で書いている）。
-  * main.py をテスト用に書き換え、戻し忘れるリスクをできるだけ回避するため、main.py はミッション全体の司令塔のみを役割とし、フェーズの切り替えや状態管理などは `~/csmn` 以下に役割ごとに細かく分割した。
-  * ログを解析する `anlz/log_anlz.py` を用意した。使い方は自分のPCの `/NSE2026/anlz/robust_logs` に出力された `robust_log_*.csv` を置いて、自分のPCで `log_anlz.py` を実行する。これにより、最新のログが自動で分類、グラフ化、可視化される。出力データは `~/anlz/outputs/robust_log_*` にすべて置かれる。Plotlyを使っているので、`*.html` を開くとウェブブラウザ上で細かくグラフを見られる。注意として、ラズパイ上でこのコードを実行すると処理が非常に重くなるため、実行はPC上のみですること。
-
 ## 1. 環境構築の準備
 
 ### ハードウェア
@@ -259,9 +185,12 @@ cd NSE2026
 ## 5.1 ドキュメントの役割分担（重複を避けるため）
 
 * `README.md`
-  * セットアップ手順、実行コマンド、運用手順。
+  * 原則としてセットアップ手順、依存導入、実行コマンドの入口のみを残す。
+  * 構成説明や二機体運用の考え方は同階層の `arch_summary.md` を参照する。
+* `arch_summary.md`
+  * リポジトリ全体の構成、設計意図、二機体運用、デバッグ運用。
 * `csmn/arch_summary.md`
-  * `csmn/` の設計内容と保守ルールのみ。
+  * `csmn/` の内部設計と保守ルールのみ。
 * `runs/cam/cam_relay_readme.md`
   * カメラ中継テスト（SBC↔PC）の手順のみ。
 
@@ -277,19 +206,21 @@ cd NSE2026
 ```bash
 # 本番実行
 python3 main.py
+python3 main.py --machine unit1
+python3 main.py --machine unit2
 
 # フェーズ限定オーケストレーション
-python3 runs/orch/orch_p1_p3.py
-python3 runs/orch/orch_p2_p3.py
-python3 runs/orch/orch_p3_p4.py
-python3 runs/orch/orch_p4_p7.py
-python3 runs/orch/orch_p1_p7.py
-python3 runs/orch/orch_p2_p7.py
+python3 runs/orch/orch_p1_p3.py --machine unit1
+python3 runs/orch/orch_p2_p3.py --machine unit2
+python3 runs/orch/orch_p3_p4.py --machine unit1 --debug-scope shared
+python3 runs/orch/orch_p4_p7.py --machine unit2 --debug-scope machine
+python3 runs/orch/orch_p1_p7.py --machine unit1 --debug-label full_stack
+python3 runs/orch/orch_p2_p7.py --machine unit2 --target-lat 30.374217 --target-lng 130.959968
 
 # 各種テストコード
 python3 runs/diag/sensor.py
-python3 runs/diag/gps.py
-python3 runs/diag/motor.py
+python3 runs/diag/gps.py --machine unit1
+python3 runs/diag/motor.py --machine unit2
 python3 runs/diag/led.py
 
 # 審査書試験系（フェーズ0試験）

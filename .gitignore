@@ -12,6 +12,7 @@ __pycache__/
 
 # Test logs
 /runs/log/
+/log/
 
 # Virtual environment
 /venv
@@ -21,3 +22,6 @@ __pycache__/
 
 # IDE specific files
 /.idea/
+
+# Codex
+/.codex

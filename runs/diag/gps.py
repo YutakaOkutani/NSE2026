@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from csmn.gps_util import RobustGPSReader, open_gps_serial
+from csmn.profile import activate_machine_profile, list_profiles
 
 
 UPDATE_INTERVAL_SECONDS = 5
@@ -31,6 +31,8 @@ def _coordinate_display(fix, value_key, text_key):
 
 
 def read_raw_nmea(duration_seconds=10.0):
+    from csmn.gps_util import open_gps_serial
+
     print("=== RAW GPS INPUT PROBE ===")
     print(f"Duration: {duration_seconds}s")
     serial_obj, port, baud = open_gps_serial()
@@ -68,6 +70,7 @@ def read_raw_nmea(duration_seconds=10.0):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="GPS startup diagnostic tool")
+    parser.add_argument("--machine", default="common", choices=list_profiles())
     parser.add_argument("--raw-probe-seconds", type=float, default=10.0)
     parser.add_argument("--skip-raw-probe", action="store_true")
     parser.add_argument("--update-interval", type=float, default=UPDATE_INTERVAL_SECONDS)
@@ -76,6 +79,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    activate_machine_profile(args.machine)
+    from csmn.gps_util import RobustGPSReader
+
     update_interval = max(0.5, float(args.update_interval))
 
     if not args.skip_raw_probe:

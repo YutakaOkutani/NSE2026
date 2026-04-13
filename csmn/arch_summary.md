@@ -9,16 +9,24 @@
 
 - `main.py`
   - 本番エントリポイント。
-  - `run_full_mission()` を呼ぶだけの最小司令塔。
+  - `run_full_mission()` を呼ぶ最小司令塔。
+  - `--machine` で機体プロファイルを切り替える。
 - `csmn/`
   - ミッション実装本体（定数・状態・司令塔・フェーズ・I/O管理）。
+- `csmn/profile.py`
+  - 二機体運用のためのプロファイル層。
+  - 共通コードを複製せず、機体差分だけをここに寄せる。
 - `runs/orch/orch_*.py`
   - フェーズ限定デバッグ用の入口。
+  - `--machine` と `--debug-scope` により、個別試験と共有試験を同じ操作で切り替える。
 
 ## ディレクトリごとの責務
 
 - `csmn/const.py`
   - 定数の一元管理（フェーズ番号、閾値、GPIO、タイムアウトなど）。
+- `csmn/profile.py`
+  - `common` / `unit1` / `unit2` の差分定義。
+  - `LOG_DIR` やモータ補正値のような機体差分を適用する。
 - `csmn/st.py`
   - `CanSatState`（スレッドセーフな共有状態）の管理。
 - `csmn/nav.py`
@@ -53,5 +61,6 @@
 ## 変更ルール
 
 - マジックナンバー禁止。値変更は `csmn/const.py` のみで実施。
+- 機体固有値は `csmn/profile.py` に置き、`csmn/const.py` を機体ごとに分岐させない。
 - フェーズ仕様の変更は対象 `csmn/phs/pX.py` を優先修正。
 - ハード不具合調査は `csmn/mgr/sns_mgr.py` と `csmn/mgr/hw_mgr.py` を優先確認。

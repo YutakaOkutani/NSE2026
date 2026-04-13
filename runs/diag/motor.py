@@ -1,3 +1,4 @@
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -8,9 +9,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from gpiozero import PWMOutputDevice, DigitalOutputDevice
-from gpiozero.pins.lgpio import LGPIOFactory
-
 from csmn.const import (
     MANUAL_TURN_SPEED_RATIO,
     MOTOR_DIR_INVERT_1,
@@ -19,24 +17,14 @@ from csmn.const import (
     MOTOR_SPEED_OFFSET_2,
     MOTOR_SPEED_SCALE_1,
     MOTOR_SPEED_SCALE_2,
+    PIN_EN1,
+    PIN_EN2,
+    PIN_PH1,
+    PIN_PH2,
+    PWM_FREQ,
 )
-from csmn.mgr.mtr_mgr import get_manual_drive_pattern
+from csmn.profile import activate_machine_profile, list_profiles
 
-# --- GPIO Pin Definition ---
-# DRV8256E: Phase/Enable Mode
-# EN (Enable) -> PWM (Speed)
-# PH (Phase)  -> High/Low (Direction)
-
-# Motor 1 (Left)
-PIN_EN1 = 12  # Enable (PWM Speed)
-PIN_PH1 = 13  # Phase (Direction)
-
-# Motor 2 (Right)
-PIN_EN2 = 19   # Enable (PWM Speed)
-PIN_PH2 = 17  # Phase (Direction)
-
-# PWM Parameters
-PWM_FREQ = 1000  # PWM Frequency in Hz
 DEFAULT_SPEED = 100  # Default duty for manual control (0-100)
 SPEED_STEP = 5  # Duty adjustment step for interactive test (0-100)
 COMMAND_BUFFER_SEC = 0.25  # Delay before applying a new command to avoid regen spikes
@@ -52,10 +40,42 @@ motor_state = {
     'B': {'speed': 0.0, 'direction': 1},
 }
 
+MANUAL_DRIVE_PATTERNS = {
+    "w": ("Forward", True, True),
+    "s": ("Backward", False, False),
+    "a": ("Left", True, True),
+    "d": ("Right", True, True),
+}
+
+
+def get_manual_drive_pattern(cmd, speed):
+    pattern = MANUAL_DRIVE_PATTERNS.get((cmd or "").lower())
+    if pattern is None:
+        return None
+    label, forward_a, forward_b = pattern
+    speed_fast = float(speed)
+    speed_slow = speed_fast * MANUAL_TURN_SPEED_RATIO
+    speed_a = speed_fast
+    speed_b = speed_fast
+    cmd_key = (cmd or "").lower()
+    if cmd_key == "a":
+        speed_a = speed_slow
+    elif cmd_key == "d":
+        speed_b = speed_slow
+    return {
+        "label": label,
+        "speed_a": speed_a,
+        "forward_a": bool(forward_a),
+        "speed_b": speed_b,
+        "forward_b": bool(forward_b),
+    }
+
 
 def setup():
     """Initialize gpiozero devices."""
     global pin_factory, motor_1_pwm, motor_1_dir, motor_2_pwm, motor_2_dir
+    from gpiozero import PWMOutputDevice, DigitalOutputDevice
+    from gpiozero.pins.lgpio import LGPIOFactory
 
     pin_factory = LGPIOFactory()
     motor_1_pwm = PWMOutputDevice(PIN_EN1, pin_factory=pin_factory, frequency=PWM_FREQ, initial_value=0)
@@ -331,8 +351,17 @@ def _clamp_speed(speed):
     return max(0.0, min(100.0, float(speed)))
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Interactive motor diagnostic")
+    parser.add_argument("--machine", default="common", choices=list_profiles())
+    parser.add_argument("--default-speed", type=float, default=DEFAULT_SPEED)
+    return parser.parse_args()
+
+
 def main():
-    current_speed = float(DEFAULT_SPEED)
+    args = parse_args()
+    activate_machine_profile(args.machine, extra_modules=[sys.modules[__name__]])
+    current_speed = float(args.default_speed)
     try:
         setup()
         print(

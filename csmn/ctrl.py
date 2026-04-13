@@ -5,6 +5,7 @@ import time
 import csv
 
 from csmn.const import (
+    CAMERA_CONTROL_INVERT_X,
     DEFAULT_BNO_CALIB,
     DEFAULT_VECTOR3,
     DEVICE_KEYS,
@@ -62,10 +63,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
                 return candidate
             suffix += 1
 
-    def __init__(self, target_lat, target_lng):
+    def __init__(self, target_lat, target_lng, machine_name="common"):
         self.st = CanSatState()
+        self.machine_name = str(machine_name)
         self.target_lat = target_lat
         self.target_lng = target_lng
+        self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
         now_time = datetime.datetime.now()
         os.makedirs(LOG_DIR, exist_ok=True)
         self.log_path = self._build_unique_log_path(LOG_DIR, now_time)
