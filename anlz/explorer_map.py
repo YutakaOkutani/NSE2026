@@ -85,17 +85,11 @@ def ensure_runtime_dependencies() -> None:
 
 def find_latest_log() -> Path:
     candidates: list[Path] = []
-    search_roots = [
-        REPO_ROOT / "log",
-        REPO_ROOT / "anlz" / "robust_logs",
-        Path.home() / "TRC2026" / "anlz" / "robust_logs",
-    ]
-    for root in search_roots:
-        if not root.exists():
-            continue
-        candidates.extend(root.rglob(f"{LOG_PREFIX}*.csv"))
+    search_root = REPO_ROOT / "anlz" / "robust_logs"
+    if search_root.exists():
+        candidates.extend(search_root.rglob(f"{LOG_PREFIX}*.csv"))
     if not candidates:
-        raise FileNotFoundError("No robust_log_*.csv found in repo log/ or anlz/robust_logs/")
+        raise FileNotFoundError(f"No robust_log_*.csv found in {search_root}")
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
