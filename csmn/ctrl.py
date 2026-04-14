@@ -51,16 +51,21 @@ from csmn.st import CanSatState
 
 class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager):
     @staticmethod
-    def _build_unique_log_path(log_dir, now_time):
-        log_stem = LOG_PREFIX + now_time.strftime(LOG_FILE_DATETIME_FORMAT) + f"-{now_time.microsecond:06d}"
-        log_path = os.path.join(log_dir, log_stem + ".csv")
-        if not os.path.exists(log_path):
-            return log_path
+    def _build_run_stem(now_time):
+        return LOG_PREFIX + now_time.strftime(LOG_FILE_DATETIME_FORMAT) + f"-{now_time.microsecond:06d}"
+
+    @classmethod
+    def _build_unique_run_dir(cls, log_root, now_time):
+        run_stem = cls._build_run_stem(now_time)
+        run_dir = os.path.join(log_root, run_stem)
+        if not os.path.exists(run_dir):
+            return run_dir, run_stem
         suffix = 1
         while True:
-            candidate = os.path.join(log_dir, f"{log_stem}-{suffix}.csv")
+            candidate_stem = f"{run_stem}-{suffix}"
+            candidate = os.path.join(log_root, candidate_stem)
             if not os.path.exists(candidate):
-                return candidate
+                return candidate, candidate_stem
             suffix += 1
 
     def __init__(self, target_lat, target_lng, machine_name="common"):
@@ -71,7 +76,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
         now_time = datetime.datetime.now()
         os.makedirs(LOG_DIR, exist_ok=True)
-        self.log_path = self._build_unique_log_path(LOG_DIR, now_time)
+        self.run_dir, self.run_stem = self._build_unique_run_dir(LOG_DIR, now_time)
+        os.makedirs(self.run_dir, exist_ok=True)
+        self.log_path = os.path.join(self.run_dir, self.run_stem + ".csv")
+        self.capture_reached_path = os.path.join(self.run_dir, "capture_reached.png")
 
         self.devices = {key: None for key in DEVICE_KEYS}
         self.led_blink_timer = 0

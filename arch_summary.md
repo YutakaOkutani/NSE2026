@@ -7,6 +7,31 @@
 - `arch_summary.md`
   - ファイル構成、各ディレクトリの責務、二機体運用、共通化と固有化の境界、デバッグ運用をまとめる。
 
+## ログ出力先早見表
+
+| 実行入口 | 主な出力 | 既定の保存先 |
+| --- | --- | --- |
+| `python3 main.py --machine common` | ミッションCSV + 到達時PNG | `log/common/<run_id>/` |
+| `python3 main.py --machine unit1` | ミッションCSV + 到達時PNG | `log/unit1/<run_id>/` |
+| `python3 main.py --machine unit2` | ミッションCSV + 到達時PNG | `log/unit2/<run_id>/` |
+| `runs/orch/*.py` | ミッションCSV + 到達時PNG | `runs/log/by_machine/<machine>/<label>/<run_id>/` |
+| `runs/orch/*.py --debug-scope shared` | ミッションCSV + 到達時PNG | `runs/log/shared/<label>/<machine>/<run_id>/` |
+| `runs/evt/open_parachute.py` | ミッションCSV + 到達時PNG | `runs/log/open_parachute/<run_id>/` |
+| `runs/evt/landing_impact.py` | ミッションCSV + 到達時PNG | `runs/log/landing_impact/<run_id>/` |
+| `runs/cam/cam_detector_dbg.py` | `debug.csv` + 各種PNG + 到達時PNG | `runs/log/camera_debug_<timestamp>_<ms>/` |
+| `runs/cam/cam_capture_data.py` | 撮影JPEG群 | `runs/log/capture_<timestamp>[_session]/` |
+| `runs/diag/gps.py` | 端末出力のみ | 保存ファイルなし |
+| `runs/diag/sensor.py` | 端末出力のみ | 保存ファイルなし |
+| `runs/diag/motor.py` | 端末出力のみ | 保存ファイルなし |
+| `runs/diag/led.py` | 端末出力のみ | 保存ファイルなし |
+| `runs/cam/cam_relay_sbc.py` | 端末出力 + 通信 | 保存ファイルなし |
+| `runs/cam/cam_relay_pc.py` | 端末出力 + GUI表示 | 保存ファイルなし |
+| `runs/spec/p0_detection.py` | `unittest` 出力 | 保存ファイルなし |
+
+- `<run_id>` は `robust_log_YYYY-mmdd-HHMMSS-uuuuuu` 形式の実行ごとサブフォルダ。
+- `main.py` 系と `runs/orch` 系では、CSV と `capture_reached.png` が同じ `<run_id>/` 配下に入る。
+- `main.py` / `runs/orch` は `--log-dir` 指定時、そのパスを「実行一覧の親フォルダ」として使う。
+
 ## ファイル構成
 
 ```plaintext

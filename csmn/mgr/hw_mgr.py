@@ -190,6 +190,9 @@ class HardwareManager:
             self.roi_img = roi_img
             self.roi_references = list(roi_images)
             detector.set_roi_img(roi_images if roi_images else roi_img)
+            detector.capture_reached_path = str(
+                getattr(self, "capture_reached_path", os.path.join(".", "log", "capture_reached.png"))
+            )
             self.devices[DEVICE_DETECTOR] = detector
             print("Camera: OK (Initialized)")
             return True

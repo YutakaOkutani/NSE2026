@@ -34,6 +34,7 @@ class detector:
         self.is_reached = False
         self.debug_method = "init"
         self.debug_scores = {}
+        self.capture_reached_path = "./log/capture_reached.png"
 
         # Camera
         self.picam2 = None
@@ -1341,7 +1342,7 @@ class detector:
 
         if self.is_reached:
             try:
-                self.picam2.capture_file("./log/capture_reached.png")
+                self.picam2.capture_file(str(self.capture_reached_path))
             except Exception:
                 pass
 

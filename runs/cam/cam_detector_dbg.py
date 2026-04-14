@@ -126,6 +126,7 @@ def main():
     csv_path = outdir / "debug.csv"
 
     detector = dc.detector()
+    detector.capture_reached_path = str(outdir / "capture_reached.png")
     try:
         roi_loader = _RoiLoader()
         roi_images = roi_loader._load_roi_images()
