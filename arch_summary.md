@@ -40,9 +40,10 @@
 ├── main.py                            # 本番ミッションの入口
 ├── .gitignore                         # Git除外設定
 ├── gerber/                            # 基板設計データ
-│   └── TRC2026 v5.zip
+│   └── NSE2026 v2_2026-04-13.zip
 ├── anlz/                              # ログ解析
 │   ├── log_anlz.py
+│   ├── explorer_map.py
 │   └── DEBUG_POLICY.md
 ├── csmn/                              # ミッション本体
 │   ├── __init__.py

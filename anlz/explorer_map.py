@@ -204,7 +204,7 @@ def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def summarize_mission(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float | int | str]]:
     phase_rows = []
     phase_series = df["Phase"].dropna().astype(int)
-    elapsed = df["ElapsedSec"].fillna(method="ffill").fillna(0.0)
+    elapsed = df["ElapsedSec"].ffill().fillna(0.0)
 
     for phase, group in df.groupby("Phase", dropna=True):
         idx = group.index
@@ -729,7 +729,6 @@ def analyze_explorer_log(
 ) -> Path:
     ensure_runtime_dependencies()
     log_path = Path(file_path).resolve() if file_path else find_latest_log()
-    out_dir = prepare_output_dir(log_path)
 
     raw_df = pd.read_csv(log_path)
     df = build_mission_dataframe(raw_df)
@@ -743,6 +742,7 @@ def analyze_explorer_log(
         grid_size=max(30, int(grid_size)),
     )
     mission_start_dt = parse_log_start_time(log_path)
+    out_dir = prepare_output_dir(log_path)
 
     export_cols = [
         col
