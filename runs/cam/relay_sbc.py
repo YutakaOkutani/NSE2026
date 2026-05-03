@@ -99,7 +99,7 @@ class RelayController(HardwareManager, MotorManager, SensorManager, LedManager):
         self.motor_state = {}
         self.stop_event = threading.Event()
         self.debug_lock = threading.Lock()
-        # Detector input is standardized to the vehicle-forward orientation in detect_corn.py.
+        # Detector input is standardized to the vehicle-forward orientation in cone_detect.py.
         # Keep optional override, but default to no extra control inversion.
         self.camera_control_invert_x = bool(getattr(args, "camera_control_invert_x", False))
         print(f"Camera control X inversion: {'ON' if self.camera_control_invert_x else 'OFF'}")
@@ -262,7 +262,7 @@ class RelayController(HardwareManager, MotorManager, SensorManager, LedManager):
         if frame is None:
             return None
         # Optional preview transforms for operator convenience.
-        # Detector input is already standardized in detect_corn.py.
+        # Detector input is already standardized in cone_detect.py.
         if getattr(self.args, "preview_swap_rb", True):
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         if getattr(self.args, "preview_rotate_180", True):

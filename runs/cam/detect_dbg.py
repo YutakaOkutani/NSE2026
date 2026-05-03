@@ -17,10 +17,10 @@ from csmn.const import (
     CONE_PROBABILITY_THRESHOLD_PHASE5,
 )
 from csmn.mgr.hw_mgr import HardwareManager
-from lib import detect_corn as dc
+from lib import cone_detect as dc
 
 DEFAULT_OUT_BASE = PROJECT_ROOT / "runs" / "log"
-WINDOW_NAME = "Detector Debug (Production detect_corn.py)"
+WINDOW_NAME = "Detector Debug (Production cone_detect.py)"
 
 
 class _RoiLoader(HardwareManager):

@@ -10,18 +10,18 @@
 
 ## 重要原則
 
-- 本番実装 `lib/detect_corn.py` を基準とする
+- 本番実装 `lib/cone_detect.py` を基準とする
 - 1回の試験で ROI と閾値を同時にいじりすぎない
 - GUI がなくても評価できる保存経路を持つ
 - 成功例だけでなく失敗例を資産化する
 
 ## スクリプトの位置づけ
 
-- `cam_capture_data.py`
+- `capture.py`
   - 現場サンプルの収集
-- `cam_detector_dbg.py`
+- `detect_dbg.py`
   - 本番 detector の観測・比較
-- `cam_relay_*`
+- `relay_*`
   - 検出結果と遠隔観測の補助
 
 ## 改善指針

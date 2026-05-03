@@ -191,7 +191,7 @@ cd NSE2026
   * リポジトリ全体の構成、設計意図、二機体運用、デバッグ運用。
 * `csmn/arch_summary.md`
   * `csmn/` の内部設計と保守ルールのみ。
-* `runs/cam/cam_relay_readme.md`
+* `runs/cam/relay.md`
   * カメラ中継テスト（SBC↔PC）の手順のみ。
 
 ---
@@ -210,12 +210,12 @@ python3 main.py --machine unit1
 python3 main.py --machine unit2
 
 # フェーズ限定オーケストレーション
-python3 runs/orch/orch_p1_p3.py --machine unit1
-python3 runs/orch/orch_p2_p3.py --machine unit2
-python3 runs/orch/orch_p3_p4.py --machine unit1 --debug-scope shared
-python3 runs/orch/orch_p4_p7.py --machine unit2 --debug-scope machine
-python3 runs/orch/orch_p1_p7.py --machine unit1 --debug-label full_stack
-python3 runs/orch/orch_p2_p7.py --machine unit2 --target-lat 30.374217 --target-lng 130.959968
+python3 runs/orch/p1_p3.py --machine unit1
+python3 runs/orch/p2_p3.py --machine unit2
+python3 runs/orch/p3_p4.py --machine unit1 --debug-scope shared
+python3 runs/orch/p4_p7.py --machine unit2 --debug-scope machine
+python3 runs/orch/p1_p7.py --machine unit1 --debug-label full_stack
+python3 runs/orch/p2_p7.py --machine unit2 --target-lat 30.374217 --target-lng 130.959968
 
 # 各種テストコード
 python3 runs/diag/sensor.py
@@ -224,15 +224,15 @@ python3 runs/diag/motor.py --machine unit2
 python3 runs/diag/led.py
 
 # 審査書試験系（フェーズ0試験）
-python3 runs/evt/open_parachute.py
+python3 runs/evt/chute_open.py
 python3 runs/evt/landing_impact.py
 
 # 画像・カメラ系
-python3 runs/cam/cam_capture_data.py --count 10 --interval 0.5 --prefix sample
-python3 runs/cam/cam_detector_dbg.py --phase 4
+python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample
+python3 runs/cam/detect_dbg.py --phase 4
 
 # ログ解析（PC上で実行）
-python3 anlz/log_anlz.py
+python3 anlz/log.py
 ```
 
 ---

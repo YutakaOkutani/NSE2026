@@ -10,7 +10,7 @@ from gpiozero import DigitalOutputDevice, DistanceSensor, LED, PWMOutputDevice
 from gpiozero.pins.lgpio import LGPIOFactory
 
 from lib import bmp180, bno055
-from lib import detect_corn as dc
+from lib import cone_detect as dc
 
 from csmn.const import (
     BNO_FUSION_OK_STATES,

@@ -2,7 +2,7 @@ import os
 
 from csmn import const as mission_constants
 from csmn.const import Phase
-from csmn.profile import activate_machine_profile, build_mission_log_dir
+from csmn.profile import activate_machine_profile, build_mission_log_dir, resolve_machine_profile
 
 
 def _resolve_target(target_lat, target_lng):
@@ -21,13 +21,15 @@ def _read_env_float(env_key):
 
 
 def _activate_runtime(machine_name=None, log_dir=None, target_lat=None, target_lng=None):
-    resolved_machine = str(machine_name or os.getenv("CANSAT_MACHINE", "common")).strip().lower()
+    resolution = resolve_machine_profile(machine_name)
+    resolved_machine = resolution.name
     resolved_log_dir = log_dir if log_dir is not None else os.getenv("CANSAT_LOG_DIR")
     if resolved_log_dir is None:
         resolved_log_dir = build_mission_log_dir(resolved_machine)
 
     resolved_target_lat = target_lat if target_lat is not None else _read_env_float("CANSAT_TARGET_LAT")
     resolved_target_lng = target_lng if target_lng is not None else _read_env_float("CANSAT_TARGET_LNG")
+    # 実行開始前に機体差分を既存定数へ反映する。以降の制御・ログ形式は従来経路を使う。
     activate_machine_profile(
         resolved_machine,
         log_dir=resolved_log_dir,

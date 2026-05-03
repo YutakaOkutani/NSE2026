@@ -68,7 +68,7 @@ def ensure_runtime_dependencies() -> None:
             import numpy as _np
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
-                "numpy is required for anlz/explorer_map.py. Install PC-side analysis deps first."
+                "numpy is required for anlz/explorer.py. Install PC-side analysis deps first."
             ) from exc
 
         np = _np
@@ -77,7 +77,7 @@ def ensure_runtime_dependencies() -> None:
             import pandas as _pd
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
-                "pandas is required for anlz/explorer_map.py. Install PC-side analysis deps first."
+                "pandas is required for anlz/explorer.py. Install PC-side analysis deps first."
             ) from exc
 
         pd = _pd

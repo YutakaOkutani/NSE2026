@@ -7,7 +7,7 @@ import traceback
 import serial
 
 from lib import bno055
-from lib import detect_corn as dc
+from lib import cone_detect as dc
 
 from csmn.const import (
     BMP_ALTITUDE_MAX_VALID,

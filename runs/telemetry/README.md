@@ -1,6 +1,6 @@
 # CanSat Telemetry Phase A
 
-`runs/telemetry/` は、既存の `runs/cam/cam_relay_*` から分岐した純粋なテレメトリ実装の入口である。
+`runs/telemetry/` は、既存の `runs/cam/relay_*` から分岐した純粋なテレメトリ実装の入口である。
 
 Phase A では `main.py` との接続や映像送信はまだ行わず、通常テレメトリの通信・受信・表示・記録を先に固める。
 

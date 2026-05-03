@@ -74,6 +74,8 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         self.target_lat = target_lat
         self.target_lng = target_lng
         self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
+
+        # ログは実行単位で必ず分ける。機体別の親ディレクトリは profile 側で決める。
         now_time = datetime.datetime.now()
         os.makedirs(LOG_DIR, exist_ok=True)
         self.run_dir, self.run_stem = self._build_unique_run_dir(LOG_DIR, now_time)
@@ -154,6 +156,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         self.mission_start_time = None
         self.phase_entry_time = None
         self.last_phase_observed = None
+        # timeout 判定は累積滞在時間で見るため、フェーズ遷移時にここへ積む。
         self.phase_elapsed_totals = {phase: 0.0 for phase in Phase}
         self.phase7_arrival_reason = "RUNNING"
         self.mission_end_reason = "RUNNING"
@@ -257,6 +260,8 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         if self.mission_start_time is None:
             self.mission_start_time = now
         mission_elapsed = now - self.mission_start_time
+
+        # 総ミッション時間超過は安全側に倒して Phase7 へ送る。
         if mission_elapsed >= MISSION_TIMEOUT_TOTAL:
             if not self.mission_total_timeout_triggered:
                 print(f"MISSION TIMEOUT ({mission_elapsed:.1f}s): forcing Phase7 give-up")
@@ -274,6 +279,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         if phase_elapsed < phase_budget:
             return False
 
+        # 個別フェーズの累積超過は、定数で定義された遷移先へ強制遷移する。
         next_phase = MISSION_PHASE_TIMEOUT_TRANSITIONS.get(current_phase, Phase.PHASE6)
         print(
             f"{current_phase.name} cumulative timeout ({phase_elapsed:.1f}s / {phase_budget:.1f}s): "
@@ -295,6 +301,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         try:
             while not self._shutdown_requested:
                 if allowed_set is not None:
+                    # デバッグ実行では許可フェーズを抜けた時点で正常終了扱いにする。
                     current_phase = Phase(self.st.snapshot()["phase"])
                     if current_phase not in allowed_set:
                         print(f"Phase subset completed at phase {int(current_phase)}")

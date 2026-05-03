@@ -353,13 +353,14 @@ def _clamp_speed(speed):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Interactive motor diagnostic")
-    parser.add_argument("--machine", default="common", choices=list_profiles())
+    parser.add_argument("--machine", default=None, choices=list_profiles())
     parser.add_argument("--default-speed", type=float, default=DEFAULT_SPEED)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    # モータ補正は安全に直結するため、本番と同じプロファイル適用経路を通す。
     activate_machine_profile(args.machine, extra_modules=[sys.modules[__name__]])
     current_speed = float(args.default_speed)
     try:

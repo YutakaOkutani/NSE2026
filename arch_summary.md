@@ -16,17 +16,17 @@
 | `python3 main.py --machine unit2` | ミッションCSV + 到達時PNG | `log/unit2/<run_id>/` |
 | `runs/orch/*.py` | ミッションCSV + 到達時PNG | `runs/log/by_machine/<machine>/<label>/<run_id>/` |
 | `runs/orch/*.py --debug-scope shared` | ミッションCSV + 到達時PNG | `runs/log/shared/<label>/<machine>/<run_id>/` |
-| `runs/evt/open_parachute.py` | ミッションCSV + 到達時PNG | `runs/log/open_parachute/<run_id>/` |
+| `runs/evt/chute_open.py` | ミッションCSV + 到達時PNG | `runs/log/open_parachute/<run_id>/` |
 | `runs/evt/landing_impact.py` | ミッションCSV + 到達時PNG | `runs/log/landing_impact/<run_id>/` |
-| `runs/cam/cam_detector_dbg.py` | `debug.csv` + 各種PNG + 到達時PNG | `runs/log/camera_debug_<timestamp>_<ms>/` |
-| `runs/cam/cam_capture_data.py` | 撮影JPEG群 | `runs/log/capture_<timestamp>[_session]/` |
+| `runs/cam/detect_dbg.py` | `debug.csv` + 各種PNG + 到達時PNG | `runs/log/camera_debug_<timestamp>_<ms>/` |
+| `runs/cam/capture.py` | 撮影JPEG群 | `runs/log/capture_<timestamp>[_session]/` |
 | `runs/diag/gps.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/sensor.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/motor.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/led.py` | 端末出力のみ | 保存ファイルなし |
-| `runs/cam/cam_relay_sbc.py` | 端末出力 + 通信 | 保存ファイルなし |
-| `runs/cam/cam_relay_pc.py` | 端末出力 + GUI表示 | 保存ファイルなし |
-| `runs/spec/p0_detection.py` | `unittest` 出力 | 保存ファイルなし |
+| `runs/cam/relay_sbc.py` | 端末出力 + 通信 | 保存ファイルなし |
+| `runs/cam/relay_pc.py` | 端末出力 + GUI表示 | 保存ファイルなし |
+| `runs/spec/p0_detect.py` | `unittest` 出力 | 保存ファイルなし |
 
 - `<run_id>` は `robust_log_YYYY-mmdd-HHMMSS-uuuuuu` 形式の実行ごとサブフォルダ。
 - `main.py` 系と `runs/orch` 系では、CSV と `capture_reached.png` が同じ `<run_id>/` 配下に入る。
@@ -42,8 +42,8 @@
 ├── gerber/                            # 基板設計データ
 │   └── NSE2026 v2_2026-04-13.zip
 ├── anlz/                              # ログ解析
-│   ├── log_anlz.py
-│   ├── explorer_map.py
+│   ├── log.py
+│   ├── explorer.py
 │   └── DEBUG_POLICY.md
 ├── csmn/                              # ミッション本体
 │   ├── __init__.py
@@ -79,17 +79,17 @@
 │   ├── __init__.py
 │   ├── bmp180.py
 │   ├── bno055.py
-│   ├── capture_roi_img.py
-│   ├── detect_corn.py
+│   ├── roi_capture.py
+│   ├── cone_detect.py
 │   └── DEBUG_POLICY.md
 ├── runs/                              # デバッグ・試験・補助実行スクリプト
 │   ├── DEBUG_POLICY.md
 │   ├── cam/
-│   │   ├── cam_capture_data.py
-│   │   ├── cam_detector_dbg.py
-│   │   ├── cam_relay_pc.py
-│   │   ├── cam_relay_readme.md
-│   │   ├── cam_relay_sbc.py
+│   │   ├── capture.py
+│   │   ├── detect_dbg.py
+│   │   ├── relay_pc.py
+│   │   ├── relay.md
+│   │   ├── relay_sbc.py
 │   │   └── DEBUG_POLICY.md
 │   ├── diag/
 │   │   ├── gps.py
@@ -99,20 +99,20 @@
 │   │   └── DEBUG_POLICY.md
 │   ├── evt/
 │   │   ├── landing_impact.py
-│   │   ├── open_parachute.py
+│   │   ├── chute_open.py
 │   │   └── DEBUG_POLICY.md
 │   ├── orch/
 │   │   ├── common.py
-│   │   ├── orch_p0_log.py
-│   │   ├── orch_p1_p3.py
-│   │   ├── orch_p1_p7.py
-│   │   ├── orch_p2_p3.py
-│   │   ├── orch_p2_p7.py
-│   │   ├── orch_p3_p4.py
-│   │   ├── orch_p4_p7.py
+│   │   ├── p0_log.py
+│   │   ├── p1_p3.py
+│   │   ├── p1_p7.py
+│   │   ├── p2_p3.py
+│   │   ├── p2_p7.py
+│   │   ├── p3_p4.py
+│   │   ├── p4_p7.py
 │   │   └── DEBUG_POLICY.md
 │   └── spec/
-│       ├── p0_detection.py
+│       ├── p0_detect.py
 │       └── DEBUG_POLICY.md
 └── DEBUG_POLICY.md
 ```
@@ -125,6 +125,68 @@
 - センサーや画像処理の低レイヤは `lib/` に寄せる。
 - ログ解析は `anlz/` に分け、実機制御と切り離す。
 
+## ファイル命名ポリシー
+
+- ファイル名は小文字を基本とし、単語区切りが必要な場合だけ `_` を使う。
+- 実行入口は打ち込みやすさを優先し、ディレクトリ名で意味が分かる接頭辞は省く。
+- 省略しすぎて役割が分からなくなる名前は避ける。
+- ログフォルダ名や出力ファイル名は解析互換のため原則変更しない。
+- 制御本体の責務が変わらない限り、リネームだけを目的にした内部構造変更は行わない。
+
+## ファイル名変更対応表
+
+| 変更前 | 変更後 | 理由 |
+| --- | --- | --- |
+| `anlz/log_anlz.py` | `anlz/log.py` | `anlz/` 配下で解析用途が明確なため短縮 |
+| `anlz/explorer_map.py` | `anlz/explorer.py` | 探査再構成解析として短縮 |
+| `lib/capture_roi_img.py` | `lib/roi_capture.py` | ROI 撮影用途を保ったまま短縮 |
+| `lib/detect_corn.py` | `lib/cone_detect.py` | 検出対象を cone として明確化 |
+| `runs/cam/cam_capture_data.py` | `runs/cam/capture.py` | `runs/cam/` 配下なので `cam_` を省略 |
+| `runs/cam/cam_detector_dbg.py` | `runs/cam/detect_dbg.py` | デバッグ検出入口として短縮 |
+| `runs/cam/cam_relay_pc.py` | `runs/cam/relay_pc.py` | `cam_` を省略し役割は維持 |
+| `runs/cam/cam_relay_sbc.py` | `runs/cam/relay_sbc.py` | `cam_` を省略し役割は維持 |
+| `runs/cam/cam_relay_readme.md` | `runs/cam/relay.md` | カメラ中継手順として短縮 |
+| `runs/evt/open_parachute.py` | `runs/evt/chute_open.py` | イベント名を短く統一 |
+| `runs/orch/orch_p0_log.py` | `runs/orch/p0_log.py` | `runs/orch/` 配下なので `orch_` を省略 |
+| `runs/orch/orch_p1_p3.py` | `runs/orch/p1_p3.py` | 同上 |
+| `runs/orch/orch_p1_p7.py` | `runs/orch/p1_p7.py` | 同上 |
+| `runs/orch/orch_p2_p3.py` | `runs/orch/p2_p3.py` | 同上 |
+| `runs/orch/orch_p2_p7.py` | `runs/orch/p2_p7.py` | 同上 |
+| `runs/orch/orch_p3_p4.py` | `runs/orch/p3_p4.py` | 同上 |
+| `runs/orch/orch_p4_p7.py` | `runs/orch/p4_p7.py` | 同上 |
+| `runs/spec/p0_detection.py` | `runs/spec/p0_detect.py` | 意味を保ったまま短縮 |
+
+## 機体判別仕様
+
+機体判別は `csmn/profile.py` の `resolve_machine_profile()` に集約する。
+
+判別順序:
+
+1. `--machine` などコードから渡された明示指定
+2. 環境変数 `CANSAT_MACHINE`
+3. マーカーファイル `.cansat_machine` または `/etc/cansat_machine`
+4. ホスト名と `HOSTNAME_PROFILE_MAP`
+5. 判別不能時の `common`
+
+明示指定、環境変数、マーカーファイルに未知の機体名が入っていた場合は `ValueError` とし、誤った補正値で走らせない。ホスト名から判別できない場合だけ、機体固有補正を含まない `common` をフォールバックにする。
+
+ログ分離は既存のまま維持する。`main.py` は `log/<machine>/`、`runs/orch/` は `runs/log/by_machine/<machine>/<label>/` または `runs/log/shared/<label>/<machine>/` を使う。
+
+## コメント追加方針
+
+- 機体判別、プロファイル適用、ログ出力先確定の意図が分かる箇所に短いコメントを追加する。
+- モータ補正など安全に関わる診断入口では、本番と同じプロファイル適用経路を使う意図を明記する。
+- 制御式、タイミング、通信形式、ログ列の意味を変えるコメント追加は行わない。
+- コードをそのまま言い換えるコメントは避け、将来の保守者が判断理由を追える内容にする。
+
+## 今回の変更点
+
+- 長い実行ファイル名を短縮し、参照ドキュメントと import を追従した。
+- `csmn/profile.py` に機体判別処理を追加し、判別結果を本番・オーケストレーション・GPS診断・モータ診断で共通利用するようにした。
+- `--machine` は互換用の明示上書きとして維持し、指定がない場合に自動判別する動作へ変更した。
+- 判別不能時のフォールバックと、未知の明示指定をエラーにする条件を明文化した。
+- 機体判別と安全上重要なプロファイル適用箇所にコメントを追加した。
+
 ## 役割分担
 
 - `README.md`
@@ -133,7 +195,7 @@
   - 構成全体の把握、設計判断、保守時の境界確認。
 - `csmn/arch_summary.md`
   - `csmn/` 内部の責務整理と変更ルール。
-- `runs/cam/cam_relay_readme.md`
+- `runs/cam/relay.md`
   - カメラ中継試験の詳細手順。
 
 ## 二機体運用の考え方
@@ -147,7 +209,7 @@
   - 例: モータ補正、ログ出力先、カメラ向き、将来のGPIO差分。
 - デバッグ入口
   - `main.py` と `runs/orch/*.py`、`runs/diag/*.py`。
-  - どの機体をどの目的で動かすかを引数で切り替える。
+  - どの機体をどの目的で動かすかを自動判別または引数で切り替える。
 
 初期プロファイル:
 
@@ -201,8 +263,8 @@
   - `python3 main.py --machine unit1`
   - `python3 main.py --machine unit2`
 - フェーズ限定試験
-  - `python3 runs/orch/orch_p1_p3.py --machine unit1`
-  - `python3 runs/orch/orch_p3_p4.py --machine unit2 --debug-scope shared`
+  - `python3 runs/orch/p1_p3.py --machine unit1`
+  - `python3 runs/orch/p3_p4.py --machine unit2 --debug-scope shared`
 - 個別診断
   - `python3 runs/diag/gps.py --machine unit1`
   - `python3 runs/diag/motor.py --machine unit2`
@@ -212,7 +274,7 @@
 `main.py` は標準入力を前提にせず、引数だけで起動できるため、systemd 自動起動に向いた入口になっている。
 
 - 本番入口は `python3 main.py` だけで完結する。
-- 機体切替は `--machine` もしくは `CANSAT_MACHINE` で指定できる。
+- 機体切替は自動判別を基本とし、`--machine` または `CANSAT_MACHINE` で明示上書きできる。
 - 目標座標は `--target-lat` / `--target-lng`、または `CANSAT_TARGET_LAT` / `CANSAT_TARGET_LNG` で上書きできる。
 - ログ出力先は `--log-dir`、または `CANSAT_LOG_DIR` で上書きできる。
 - `csmn/profile.py` の既定 `LOG_DIR` はリポジトリ基準の絶対パスになるため、systemd の `WorkingDirectory` に過度に依存しない。
@@ -220,7 +282,7 @@
 systemd 運用で意識する点:
 
 - 実機の Python 実行環境を `ExecStart` で明示する。
-  - 例: `ExecStart=/home/pi/NSE2026/venv/bin/python3 /home/pi/NSE2026/main.py --machine unit1`
+  - 例: `ExecStart=/home/pi/NSE2026/venv/bin/python3 /home/pi/NSE2026/main.py`
 - 依存ライブラリを入れた仮想環境またはシステム Python を使う。
   - `cv2`、`gpiozero`、`pynmea2` などが必要。
 - 可能なら `WorkingDirectory` はリポジトリルートに合わせる。
