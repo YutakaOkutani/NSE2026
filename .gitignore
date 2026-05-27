@@ -11,6 +11,7 @@ __pycache__/
 /runs/log/
 /log/
 /runs/telemetry/logs/
+/machine.txt
 
 # Virtual environment
 /venv
@@ -23,3 +24,6 @@ __pycache__/
 
 # Codex
 /.codex
+
+# Agents
+/.agents

@@ -372,6 +372,7 @@ PHASES_CAMERA_ACTIVE = (Phase.PHASE4, Phase.PHASE5)
 
 # ログのヘッダー
 LOG_HEADER = [
+    "Machine",
     "ElapsedSec",
     "Phase",
     "AccX",

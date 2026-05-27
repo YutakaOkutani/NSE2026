@@ -48,6 +48,9 @@ except Exception:
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
+KNOWN_MACHINES = ("unit1", "unit2", "common")
+UNKNOWN_MACHINE = "unknown_machine"
+
 
 @dataclass(frozen=True)
 class CameraFrame:
@@ -59,6 +62,43 @@ def _safe_numeric_series(df: pd.DataFrame, col: str) -> pd.Series:
     if col not in df.columns:
         return pd.Series(np.nan, index=df.index, dtype=float)
     return pd.to_numeric(df[col], errors="coerce")
+
+
+def normalize_machine_name(raw_value: object) -> str | None:
+    value = str(raw_value).strip().lower()
+    if value in KNOWN_MACHINES:
+        return value
+    return None
+
+
+def infer_machine_name(log_path: Path, df) -> tuple[str, str]:
+    if df is not None and "Machine" in df.columns:
+        for value in df["Machine"].dropna():
+            machine = normalize_machine_name(value)
+            if machine is not None:
+                return machine, "csv:Machine"
+
+    for part in reversed(log_path.parts):
+        machine = normalize_machine_name(part)
+        if machine is not None:
+            return machine, "path"
+
+    stem = log_path.stem.lower()
+    for machine in KNOWN_MACHINES:
+        if stem.startswith(f"{machine}_") or stem.endswith(f"_{machine}"):
+            return machine, "filename"
+
+    return UNKNOWN_MACHINE, "unknown"
+
+
+def write_analysis_context(out_dir: Path, *, log_path: Path, machine_name: str, machine_source: str) -> None:
+    lines = [
+        "CanSat Analysis Context",
+        f"Machine: {machine_name}",
+        f"Machine source: {machine_source}",
+        f"Source log: {log_path}",
+    ]
+    (out_dir / "analysis_context.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
 def ensure_runtime_dependencies() -> None:
@@ -93,8 +133,8 @@ def find_latest_log() -> Path:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def prepare_output_dir(log_path: Path) -> Path:
-    root = REPO_ROOT / "anlz" / "explorer_outputs" / log_path.stem
+def prepare_output_dir(log_path: Path, machine_name: str = UNKNOWN_MACHINE) -> Path:
+    root = REPO_ROOT / "anlz" / "explorer_outputs" / machine_name / log_path.stem
     root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = root / f"run_{stamp}"
@@ -646,9 +686,12 @@ def write_summary_text(
     obstacle_df: pd.DataFrame,
     out_dir: Path,
     mission_start_dt: datetime | None,
+    machine_name: str,
+    machine_source: str,
 ) -> None:
     lines = [
         "CanSat Explorer Reconstruction Summary",
+        f"Machine: {machine_name} ({machine_source})",
         f"Source rows: {summary['rows']}",
         f"Mission elapsed: {summary['mission_elapsed_sec']:.1f}s",
         f"Travelled distance: {summary['traveled_distance_m']:.1f}m",
@@ -706,6 +749,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional camera image directory. Matching is done by filename timestamp or file mtime.",
     )
     parser.add_argument(
+        "--machine",
+        choices=KNOWN_MACHINES,
+        default=None,
+        help="Machine override for flat/copied logs that no longer carry unit1/unit2 in their path.",
+    )
+    parser.add_argument(
         "--obstacle-max-cm",
         type=float,
         default=400.0,
@@ -726,12 +775,19 @@ def analyze_explorer_log(
     camera_dir: Path | None = None,
     obstacle_max_cm: float = 400.0,
     grid_size: int = 80,
+    machine_name: str | None = None,
 ) -> Path:
     ensure_runtime_dependencies()
     log_path = Path(file_path).resolve() if file_path else find_latest_log()
 
     raw_df = pd.read_csv(log_path)
+    if machine_name:
+        resolved_machine = machine_name
+        machine_source = "argument"
+    else:
+        resolved_machine, machine_source = infer_machine_name(log_path, raw_df)
     df = build_mission_dataframe(raw_df)
+    df.attrs["machine_name"] = resolved_machine
     phase_summary, summary = summarize_mission(df)
     obstacle_df = build_obstacle_map(df, obstacle_max_cm=obstacle_max_cm)
     events_df = build_event_table(df)
@@ -742,7 +798,8 @@ def analyze_explorer_log(
         grid_size=max(30, int(grid_size)),
     )
     mission_start_dt = parse_log_start_time(log_path)
-    out_dir = prepare_output_dir(log_path)
+    out_dir = prepare_output_dir(log_path, resolved_machine)
+    write_analysis_context(out_dir, log_path=log_path, machine_name=resolved_machine, machine_source=machine_source)
 
     export_cols = [
         col
@@ -790,9 +847,10 @@ def analyze_explorer_log(
     plot_altitude_profile(df, out_dir)
     plot_interactive_3d(df, obstacle_df, events_df, out_dir, terrain_grid)
     write_camera_event_gallery(events_df, out_dir, mission_start_dt, camera_dir)
-    write_summary_text(summary, phase_summary, df, obstacle_df, out_dir, mission_start_dt)
+    write_summary_text(summary, phase_summary, df, obstacle_df, out_dir, mission_start_dt, resolved_machine, machine_source)
 
     print(f"[INFO] Source log     : {log_path}")
+    print(f"[INFO] Machine        : {resolved_machine} ({machine_source})")
     print(f"[INFO] Output dir     : {out_dir}")
     print(f"[INFO] Valid GPS rows  : {int(df['gps_valid'].sum())} / {len(df)}")
     print(f"[INFO] Travel distance : {summary['traveled_distance_m']:.1f} m")
@@ -809,6 +867,7 @@ def main() -> None:
         camera_dir=args.camera_dir,
         obstacle_max_cm=args.obstacle_max_cm,
         grid_size=args.grid_size,
+        machine_name=args.machine,
     )
 
 

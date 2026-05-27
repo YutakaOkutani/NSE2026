@@ -182,7 +182,23 @@ cd NSE2026
 
 ---
 
-## 5.1 ドキュメントの役割分担（重複を避けるため）
+## 5.1 機体識別ファイルの作成
+
+各 Raspberry Pi で、リポジトリ直下に `machine.txt` を作成する。1号機なら `unit1`、2号機なら `unit2` を1行で書く。
+
+```bash
+# 1号機の場合
+echo unit1 > machine.txt
+
+# 2号機の場合
+echo unit2 > machine.txt
+```
+
+`machine.txt` がない場合、引数なし実行は `common` 扱いになる。`--machine unit1` のように明示指定した場合は、`machine.txt` より引数が優先される。
+
+---
+
+## 5.2 ドキュメントの役割分担（重複を避けるため）
 
 * `README.md`
   * 原則としてセットアップ手順、依存導入、実行コマンドの入口のみを残す。
@@ -196,12 +212,13 @@ cd NSE2026
 
 ---
 
-## 5.2 実行コマンド早見表
+## 5.3 実行コマンド早見表
 
 前提:
 
 * 作業ディレクトリは `~/NSE2026`
 * 必要なら先に仮想環境を有効化: `source venv/bin/activate`
+* 引数なしで機体を固定したい場合は、リポジトリ直下の `machine.txt` に `unit1` または `unit2` を1行で書く
 
 ```bash
 # 本番実行
@@ -223,9 +240,9 @@ python3 runs/diag/gps.py --machine unit1
 python3 runs/diag/motor.py --machine unit2
 python3 runs/diag/led.py
 
-# 審査書試験系（フェーズ0試験）
-python3 runs/evt/chute_open.py
-python3 runs/evt/landing_impact.py
+# フェーズ0ログ試験
+python3 runs/orch/p0_log.py --debug-label open_parachute
+python3 runs/orch/p0_log.py --debug-label landing_impact
 
 # 画像・カメラ系
 python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample

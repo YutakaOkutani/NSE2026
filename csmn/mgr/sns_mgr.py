@@ -120,6 +120,7 @@ class SensorManager:
             motor_cmd_updated_elapsed_sec = max(0.0, (motor_cmd_updated_ms / 1000.0) - mission_start)
 
         return [
+            str(getattr(self, "machine_name", "common")),
             f"{mission_elapsed_sec:.2f}",
             self._coerce_int(current_data.get("phase", 0)),
             f"{acc[0]:.2f}",

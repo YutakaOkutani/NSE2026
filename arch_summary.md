@@ -16,8 +16,6 @@
 | `python3 main.py --machine unit2` | ミッションCSV + 到達時PNG | `log/unit2/<run_id>/` |
 | `runs/orch/*.py` | ミッションCSV + 到達時PNG | `runs/log/by_machine/<machine>/<label>/<run_id>/` |
 | `runs/orch/*.py --debug-scope shared` | ミッションCSV + 到達時PNG | `runs/log/shared/<label>/<machine>/<run_id>/` |
-| `runs/evt/chute_open.py` | ミッションCSV + 到達時PNG | `runs/log/open_parachute/<run_id>/` |
-| `runs/evt/landing_impact.py` | ミッションCSV + 到達時PNG | `runs/log/landing_impact/<run_id>/` |
 | `runs/cam/detect_dbg.py` | `debug.csv` + 各種PNG + 到達時PNG | `runs/log/camera_debug_<timestamp>_<ms>/` |
 | `runs/cam/capture.py` | 撮影JPEG群 | `runs/log/capture_<timestamp>[_session]/` |
 | `runs/diag/gps.py` | 端末出力のみ | 保存ファイルなし |
@@ -97,10 +95,6 @@
 │   │   ├── motor.py
 │   │   ├── sensor.py
 │   │   └── DEBUG_POLICY.md
-│   ├── evt/
-│   │   ├── landing_impact.py
-│   │   ├── chute_open.py
-│   │   └── DEBUG_POLICY.md
 │   ├── orch/
 │   │   ├── common.py
 │   │   ├── p0_log.py
@@ -146,7 +140,6 @@
 | `runs/cam/cam_relay_pc.py` | `runs/cam/relay_pc.py` | `cam_` を省略し役割は維持 |
 | `runs/cam/cam_relay_sbc.py` | `runs/cam/relay_sbc.py` | `cam_` を省略し役割は維持 |
 | `runs/cam/cam_relay_readme.md` | `runs/cam/relay.md` | カメラ中継手順として短縮 |
-| `runs/evt/open_parachute.py` | `runs/evt/chute_open.py` | イベント名を短く統一 |
 | `runs/orch/orch_p0_log.py` | `runs/orch/p0_log.py` | `runs/orch/` 配下なので `orch_` を省略 |
 | `runs/orch/orch_p1_p3.py` | `runs/orch/p1_p3.py` | 同上 |
 | `runs/orch/orch_p1_p7.py` | `runs/orch/p1_p7.py` | 同上 |
@@ -163,12 +156,10 @@
 判別順序:
 
 1. `--machine` などコードから渡された明示指定
-2. 環境変数 `CANSAT_MACHINE`
-3. マーカーファイル `.cansat_machine` または `/etc/cansat_machine`
-4. ホスト名と `HOSTNAME_PROFILE_MAP`
-5. 判別不能時の `common`
+2. リポジトリ直下の `machine.txt`
+3. 判別不能時の `common`
 
-明示指定、環境変数、マーカーファイルに未知の機体名が入っていた場合は `ValueError` とし、誤った補正値で走らせない。ホスト名から判別できない場合だけ、機体固有補正を含まない `common` をフォールバックにする。
+明示指定または `machine.txt` に未知の機体名が入っていた場合は `ValueError` とし、誤った補正値で走らせない。どちらもない場合だけ、機体固有補正を含まない `common` をフォールバックにする。
 
 ログ分離は既存のまま維持する。`main.py` は `log/<machine>/`、`runs/orch/` は `runs/log/by_machine/<machine>/<label>/` または `runs/log/shared/<label>/<machine>/` を使う。
 
@@ -183,7 +174,7 @@
 
 - 長い実行ファイル名を短縮し、参照ドキュメントと import を追従した。
 - `csmn/profile.py` に機体判別処理を追加し、判別結果を本番・オーケストレーション・GPS診断・モータ診断で共通利用するようにした。
-- `--machine` は互換用の明示上書きとして維持し、指定がない場合に自動判別する動作へ変更した。
+- `--machine` は明示上書きとして維持し、指定がない場合は `machine.txt` を読む動作へ変更した。
 - 判別不能時のフォールバックと、未知の明示指定をエラーにする条件を明文化した。
 - 機体判別と安全上重要なプロファイル適用箇所にコメントを追加した。
 
@@ -206,10 +197,10 @@
   - `csmn/` のフェーズ制御、状態管理、ナビゲーション、ハード制御。
 - 機体固有プロファイル
   - `csmn/profile.py` に機体差分だけを置く。
-  - 例: モータ補正、ログ出力先、カメラ向き、将来のGPIO差分。
+  - 例: モータ補正、ログ出力先、将来のGPIO差分。
 - デバッグ入口
   - `main.py` と `runs/orch/*.py`、`runs/diag/*.py`。
-  - どの機体をどの目的で動かすかを自動判別または引数で切り替える。
+  - どの機体をどの目的で動かすかを `machine.txt` または引数で切り替える。
 
 初期プロファイル:
 
@@ -232,10 +223,12 @@
   - デバッグスクリプトの入口構造
 - 固有化するもの
   - モータ左右の補正値
-  - カメラの制御向き補正
-  - 目標座標の既定値
   - ログ保存先
   - 将来もし差が出るならGPIO割当や機体名
+- 共通化するもの
+  - カメラの制御向き補正
+  - GPS方位補正、GPS座標補正
+  - 目標座標の既定値
 
 避けるべき運用:
 
@@ -274,7 +267,8 @@
 `main.py` は標準入力を前提にせず、引数だけで起動できるため、systemd 自動起動に向いた入口になっている。
 
 - 本番入口は `python3 main.py` だけで完結する。
-- 機体切替は自動判別を基本とし、`--machine` または `CANSAT_MACHINE` で明示上書きできる。
+- 機体切替は `--machine` を最優先し、指定がなければリポジトリ直下の `machine.txt` を読む。
+- `machine.txt` に `unit1` または `unit2` と書くと、引数なしでも機体を固定できる。
 - 目標座標は `--target-lat` / `--target-lng`、または `CANSAT_TARGET_LAT` / `CANSAT_TARGET_LNG` で上書きできる。
 - ログ出力先は `--log-dir`、または `CANSAT_LOG_DIR` で上書きできる。
 - `csmn/profile.py` の既定 `LOG_DIR` はリポジトリ基準の絶対パスになるため、systemd の `WorkingDirectory` に過度に依存しない。
@@ -296,14 +290,13 @@ systemd 運用で意識する点:
 [Service]
 WorkingDirectory=/home/pi/NSE2026
 ExecStart=/home/pi/NSE2026/venv/bin/python3 /home/pi/NSE2026/main.py
-Environment=CANSAT_MACHINE=unit1
 Environment=CANSAT_TARGET_LAT=30.374217
 Environment=CANSAT_TARGET_LNG=130.959968
 Environment=CANSAT_LOG_DIR=/home/pi/NSE2026/log/unit1
 Restart=on-failure
 ```
 
-この形にしておくと、systemd の unit file または `EnvironmentFile` で機体ごとの差分を切り替えられる。
+機体名は `machine.txt` で固定し、systemd 側には試験日ごとに変わる値だけを置く。
 
 ## 固有値の管理場所と変更方法
 
@@ -325,11 +318,12 @@ Restart=on-failure
 3. `csmn/profile.py` の機体既定値
 4. `csmn/const.py` の共通既定値
 
+機体名そのものの判別優先順位は「明示引数、`machine.txt`, `common`」である。リポジトリ直下の `machine.txt` はローカル設定として使い、Git には含めない。
+
 代表例:
 
 - 目標座標
   - 共通の既定値: `csmn/const.py` の `TARGET_LAT`, `TARGET_LNG`
-  - 機体ごとの既定値: `csmn/profile.py` の `const_overrides` に `TARGET_LAT`, `TARGET_LNG` を追加
   - 一時変更: `--target-lat`, `--target-lng` または `CANSAT_TARGET_LAT`, `CANSAT_TARGET_LNG`
 - ログ保存先
   - 機体ごとの既定値: `csmn/profile.py` の `LOG_DIR`
@@ -337,8 +331,8 @@ Restart=on-failure
 - モータ補正値
   - 機体ごとの既定値: `csmn/profile.py` の `MOTOR_SPEED_SCALE_1`, `MOTOR_SPEED_SCALE_2`, `MOTOR_SPEED_OFFSET_1`, `MOTOR_SPEED_OFFSET_2`
   - 一時変更: 原則 `csmn/profile.py` を編集して管理する
-- カメラ向き補正
-  - 機体ごとの既定値: `csmn/profile.py` の `CAMERA_CONTROL_INVERT_X`
+- カメラ向き補正、GPS補正
+  - 共通の既定値: `csmn/const.py` の `CAMERA_CONTROL_INVERT_X`, `GPS_HEADING_OFFSET`, `GPS_COORD_LAT_OFFSET_DEG`, `GPS_COORD_LNG_OFFSET_DEG`
 - 将来のGPIO差分
   - 差分が本当に固定化したら `csmn/profile.py` に持たせる
   - 共通で済むなら `csmn/const.py` のままにする
@@ -347,7 +341,7 @@ Restart=on-failure
 
 - 「その機体では常にそう動くべき値」は `csmn/profile.py` に入れる。
 - 「試験日だけ変えたい値」は起動引数か環境変数で変える。
-- 「二機体とも同じ基準で見直したい値」は `csmn/const.py` に置く。
+- 「二機体とも同じ基準で見直したい値」は `csmn/const.py` に置く。カメラ向き、GPS補正、目標座標はこの扱いにする。
 - 値変更後は、共有デバッグか機体固有デバッグかを決めてログ保存先も対応させる。
 
 ## 保守ルール

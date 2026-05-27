@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from csmn.const import Phase
+from csmn.const import PHASE0_DROP_TO_PHASE1_DELAY_SEC, Phase
 from csmn.phs.p0 import Phase0Handler
 
 
@@ -26,6 +26,7 @@ class _FakeController:
         self.phase_entry_time = time.time()
         self.phase0_entry_marker = None
         self.phase0_initial_alt = None
+        self.phase0_drop_detect_time = None
         self.phase0_wait_log_counter = 0
         self.time_phase1_start = None
         self.bmp_last_valid_time = 0.0
@@ -66,6 +67,7 @@ class Phase0DetectionTest(unittest.TestCase):
         self.ctrl.bmp_stale_sec = 0.0
         self.ctrl.phase0_initial_alt = 120.0
         self.ctrl.phase0_entry_marker = self.ctrl.phase_entry_time
+        self.ctrl.phase0_drop_detect_time = time.time() - PHASE0_DROP_TO_PHASE1_DELAY_SEC
 
         self.handler.execute(self.ctrl, {"alt": 40.0, "fall": 0.0})
 

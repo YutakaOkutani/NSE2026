@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,8 @@ try:
 except Exception:
     LOG_HEADER = []
 
+KNOWN_MACHINES = ("unit1", "unit2", "common")
+UNKNOWN_MACHINE = "unknown_machine"
 
 COLUMN_GROUPS = [
     {
@@ -105,17 +108,54 @@ ANOMALY_LIGHTWEIGHT = True
 ANOMALY_HIGHLIGHT_MAX_RATE = 0.80
 
 
+def normalize_machine_name(raw_value: object) -> str | None:
+    value = str(raw_value).strip().lower()
+    if value in KNOWN_MACHINES:
+        return value
+    return None
+
+
+def infer_machine_name(log_path: Path, df: pd.DataFrame | None = None) -> tuple[str, str]:
+    if df is not None and "Machine" in df.columns:
+        for value in df["Machine"].dropna():
+            machine = normalize_machine_name(value)
+            if machine is not None:
+                return machine, "csv:Machine"
+
+    for part in reversed(log_path.parts):
+        machine = normalize_machine_name(part)
+        if machine is not None:
+            return machine, "path"
+
+    stem = log_path.stem.lower()
+    for machine in KNOWN_MACHINES:
+        if stem.startswith(f"{machine}_") or stem.endswith(f"_{machine}"):
+            return machine, "filename"
+
+    return UNKNOWN_MACHINE, "unknown"
+
+
+def write_analysis_context(out_dir: Path, *, log_path: Path, machine_name: str, machine_source: str) -> None:
+    lines = [
+        "CanSat Analysis Context",
+        f"Machine: {machine_name}",
+        f"Machine source: {machine_source}",
+        f"Source log: {log_path}",
+    ]
+    (out_dir / "analysis_context.txt").write_text("\n".join(lines), encoding="utf-8")
+
+
 def find_latest_log() -> Path:
     target_dir = REPO_ROOT / "anlz" / "robust_logs"
-    candidates = list(target_dir.glob("robust_log_*.csv")) if target_dir.exists() else []
+    candidates = list(target_dir.rglob("robust_log_*.csv")) if target_dir.exists() else []
 
     if not candidates:
         raise FileNotFoundError(f"No robust_log_*.csv found in {target_dir}")
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def prepare_output_dir(log_path: Path) -> Path:
-    log_root = REPO_ROOT / "anlz" / "outputs" / log_path.stem
+def prepare_output_dir(log_path: Path, machine_name: str = UNKNOWN_MACHINE) -> Path:
+    log_root = REPO_ROOT / "anlz" / "outputs" / machine_name / log_path.stem
     log_root.mkdir(parents=True, exist_ok=True)
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -580,12 +620,19 @@ def plot_trajectory(df: pd.DataFrame, out_dir: Path) -> None:
     plt.close(fig)
 
 
-def analyze_cansat_log(file_path: str | Path | None = None) -> Path:
+def analyze_cansat_log(file_path: str | Path | None = None, *, machine_name: str | None = None) -> Path:
     log_path = Path(file_path).resolve() if file_path else find_latest_log()
-    out_dir = prepare_output_dir(log_path)
 
     df = pd.read_csv(log_path)
     df.attrs["source_path"] = str(log_path)
+    if machine_name:
+        resolved_machine = machine_name
+        machine_source = "argument"
+    else:
+        resolved_machine, machine_source = infer_machine_name(log_path, df)
+    df.attrs["machine_name"] = resolved_machine
+    out_dir = prepare_output_dir(log_path, resolved_machine)
+    write_analysis_context(out_dir, log_path=log_path, machine_name=resolved_machine, machine_source=machine_source)
 
     coverage = write_coverage_reports(df, out_dir)
     df = detect_anomalies(df, out_dir)
@@ -597,6 +644,7 @@ def analyze_cansat_log(file_path: str | Path | None = None) -> Path:
     plot_interactive_html(df, out_dir)
 
     print(f"[INFO] Source log: {log_path}")
+    print(f"[INFO] Machine   : {resolved_machine} ({machine_source})")
     print(f"[INFO] Output dir : {out_dir}")
     print(f"[INFO] Rows/Cols   : {len(df)} / {len(df.columns)}")
     if "HasAnomaly" in df.columns:
@@ -610,6 +658,18 @@ def analyze_cansat_log(file_path: str | Path | None = None) -> Path:
     return out_dir
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Analyze CanSat robust mission log.")
+    parser.add_argument("log_path", nargs="?", help="Path to robust_log_*.csv. Defaults to the latest log found.")
+    parser.add_argument(
+        "--machine",
+        choices=KNOWN_MACHINES,
+        default=None,
+        help="Machine override for flat/copied logs that no longer carry unit1/unit2 in their path.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    arg_path = sys.argv[1] if len(sys.argv) > 1 else None
-    analyze_cansat_log(arg_path)
+    args = parse_args()
+    analyze_cansat_log(args.log_path, machine_name=args.machine)
