@@ -837,5 +837,5 @@ sudo reboot
 * Raspberry Pi公式ドキュメント: <https://www.raspberrypi.com/documentation/>
 * Tailscale公式サイト: <https://tailscale.com/>
 * Discordウェブフックドキュメント: <https://discord.com/developers/docs/resources/webhook>
-* 設計メモ_NSE2026基板:
-* NSE2026 電子部品表:
+* 設計メモ_TRC2026基板: <https://docs.google.com/document/d/1BoxN7ev75-qyxDMl1QDe3Ul_IqAFg0KLx-Su-Op7N-4/edit?usp=drive_link>
+* 電子部品表_NSE2026: <https://docs.google.com/spreadsheets/d/1kxYLUrnnmavw1U_XV5uBSMUpxziN3frmR0-UFpshUV0/edit?gid=1327550036#gid=1327550036>
