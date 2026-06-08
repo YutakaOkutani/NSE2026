@@ -68,7 +68,31 @@ MISSION_PHASE_TIMEOUT_TRANSITIONS = {
 }
 
 # センサーと動作の閾値
+
+# Phase0: carrier release / descent detection tuning
+# 現場調整はまずこのブロックだけを見る。
+#
+# 高度検知:
+#   Phase0突入後、最初の有効なBMP高度を基準高度として保存する。
+#   `基準高度 - 現在高度` が DROP_ALTITUDE_DIFF_THRESHOLD [m] を超えると
+#   落下候補としてラッチし、PHASE0_DROP_TO_PHASE1_DELAY_SEC 秒後にPhase1へ進む。
+#   誤検知が多い場合は上げる。落としても高度で拾えない場合は下げる。
+#
+# 衝撃検知:
+#   `Fall` ログ列はBNOの3軸加速度ノルムで、静止時も重力込みで約9.8m/s^2になる。
+#   通常は PHASE0_IMPACT_DELTA_THRESHOLD で「静止baselineからのズレ」を見る。
+#   誤検知が多い場合は上げる。開傘/着地衝撃を拾えない場合は下げる。
+#   IMPACT_FALL_THRESHOLD は非常に大きい衝撃用の絶対値ガードとして残す。
+#   PHASE0_IMPACT_CONFIRM_SAMPLES は衝撃候補の連続サンプル数。1にすると敏感、
+#   3以上にするとノイズに強いが短い衝撃を逃しやすい。
+#   PHASE0_ACCEL_BASELINE_ALPHA はbaseline追従速度。通常は触らない。
+#   大きくすると姿勢変化への追従が速いが、ゆっくりした衝撃を吸収しやすい。
+#   小さくするとbaselineが安定するが、長い姿勢変化には鈍くなる。
+#   PHASE0_DROP_TO_PHASE1_DELAY_SEC は検知後に開傘/着地を待つ時間。
 IMPACT_FALL_THRESHOLD = 30.0
+PHASE0_IMPACT_DELTA_THRESHOLD = 6.0
+PHASE0_IMPACT_CONFIRM_SAMPLES = 2
+PHASE0_ACCEL_BASELINE_ALPHA = 0.08
 DROP_ALTITUDE_DIFF_THRESHOLD = 20.0
 PHASE0_DROP_TO_PHASE1_DELAY_SEC = 5.0
 

@@ -11,7 +11,10 @@ from csmn.const import (
     DROP_ALTITUDE_DIFF_THRESHOLD,
     IMPACT_FALL_THRESHOLD,
     LED_INTERVAL_PHASE0,
+    PHASE0_ACCEL_BASELINE_ALPHA,
     PHASE0_DROP_TO_PHASE1_DELAY_SEC,
+    PHASE0_IMPACT_CONFIRM_SAMPLES,
+    PHASE0_IMPACT_DELTA_THRESHOLD,
     PHASE0_SENSOR_STALE_TIMEOUT,
     Phase,
     TIMEOUT_PHASE_0,
@@ -29,6 +32,9 @@ class Phase0Handler(BasePhaseHandler):
             controller.phase0_entry_marker = entry_marker
             controller.phase0_initial_alt = None
             controller.phase0_drop_detect_time = None
+            controller.phase0_drop_detect_reason = None
+            controller.phase0_acc_baseline = None
+            controller.phase0_impact_confirm_count = 0
             controller.phase0_wait_log_counter = 0
             print("p0 : falling")
 
@@ -53,12 +59,43 @@ class Phase0Handler(BasePhaseHandler):
             controller.phase0_initial_alt = snapshot["alt"]
             print(f"Start Altitude: {controller.phase0_initial_alt:.2f}m")
 
+        fall_norm = float(snapshot["fall"] or 0.0)
+        acc_baseline = getattr(controller, "phase0_acc_baseline", None)
+        if acc_valid and fall_norm > 0.0:
+            if acc_baseline is None:
+                acc_baseline = fall_norm
+            elif abs(fall_norm - acc_baseline) < PHASE0_IMPACT_DELTA_THRESHOLD:
+                alpha = max(0.0, min(1.0, float(PHASE0_ACCEL_BASELINE_ALPHA)))
+                acc_baseline = (1.0 - alpha) * acc_baseline + alpha * fall_norm
+            controller.phase0_acc_baseline = acc_baseline
+
         initial_alt = controller.phase0_initial_alt
         altitude_diff = 0.0
         if bmp_valid and initial_alt is not None:
             altitude_diff = initial_alt - snapshot["alt"]
         is_drop = bmp_valid and initial_alt is not None and altitude_diff > DROP_ALTITUDE_DIFF_THRESHOLD
-        is_impact = acc_valid and snapshot["fall"] > IMPACT_FALL_THRESHOLD
+        impact_delta = 0.0
+        if acc_valid and acc_baseline is not None:
+            impact_delta = abs(fall_norm - acc_baseline)
+        # Backward-compatible absolute guard remains useful for very large shocks,
+        # but normal detection uses baseline-subtracted acceleration so gravity at
+        # rest (about 9.8m/s^2) does not consume the threshold budget.
+        impact_sample = (
+            acc_valid
+            and (
+                impact_delta >= PHASE0_IMPACT_DELTA_THRESHOLD
+                or fall_norm > IMPACT_FALL_THRESHOLD
+            )
+        )
+        if impact_sample:
+            controller.phase0_impact_confirm_count = (
+                int(getattr(controller, "phase0_impact_confirm_count", 0)) + 1
+            )
+        else:
+            controller.phase0_impact_confirm_count = 0
+        is_impact = (
+            controller.phase0_impact_confirm_count >= int(PHASE0_IMPACT_CONFIRM_SAMPLES)
+        )
 
         if not bmp_valid or not acc_valid:
             controller.phase0_wait_log_counter = int(getattr(controller, "phase0_wait_log_counter", 0)) + 1
@@ -67,31 +104,49 @@ class Phase0Handler(BasePhaseHandler):
                     "Phase0 sensor wait: "
                     f"bmp_valid={int(bmp_valid)} bmp_stale={bmp_stale_sec:.2f}s "
                     f"acc_valid={int(acc_valid)} acc_stale={bno_acc_stale_sec:.2f}s "
-                    f"alt={snapshot['alt']:.2f} fall={float(snapshot['fall'] or 0.0):.2f}"
+                    f"alt={snapshot['alt']:.2f} fall={fall_norm:.2f}"
                 )
 
+        detect_reason = None
+        detect_detail = ""
         if is_drop:
+            detect_reason = "altitude"
+            detect_detail = f"altitude_diff={altitude_diff:.2f}m"
+        elif is_impact:
+            detect_reason = "impact"
+            detect_detail = (
+                f"fall={fall_norm:.2f}m/s^2 "
+                f"baseline={float(acc_baseline or 0.0):.2f} "
+                f"delta={impact_delta:.2f}"
+            )
+
+        latched_reason = getattr(controller, "phase0_drop_detect_reason", None)
+        if detect_reason is None and latched_reason == "impact":
+            detect_reason = "impact"
+            detect_detail = (
+                f"latched impact; fall={fall_norm:.2f}m/s^2 "
+                f"baseline={float(acc_baseline or 0.0):.2f}"
+            )
+
+        if detect_reason is not None:
             if controller.phase0_drop_detect_time is None:
                 controller.phase0_drop_detect_time = now
+                controller.phase0_drop_detect_reason = detect_reason
                 print(
-                    f"Detected Drop: {altitude_diff:.2f}m "
+                    f"Detected Phase0 release candidate ({detect_reason}: {detect_detail}); "
                     f"(waiting {PHASE0_DROP_TO_PHASE1_DELAY_SEC:.1f}s before Phase1)"
                 )
             elif now - controller.phase0_drop_detect_time >= PHASE0_DROP_TO_PHASE1_DELAY_SEC:
-                print(f"Drop hold complete: {altitude_diff:.2f}m -> Phase1")
+                reason = getattr(controller, "phase0_drop_detect_reason", None) or detect_reason
+                print(f"Phase0 release hold complete ({reason}: {detect_detail}) -> Phase1")
                 controller.st.update_navigation(phase=int(Phase.PHASE1))
                 controller.time_phase1_start = now
                 return
         else:
             if controller.phase0_drop_detect_time is not None:
-                print("Drop hold canceled: altitude difference returned below threshold")
+                print("Phase0 release hold canceled: signal returned below threshold")
             controller.phase0_drop_detect_time = None
-
-        if is_impact:
-            print(f"Detected Impact: {snapshot['fall']:.2f}m/s^2")
-            controller.st.update_navigation(phase=int(Phase.PHASE1))
-            controller.time_phase1_start = now
-            return
+            controller.phase0_drop_detect_reason = None
 
         if controller.time_phase1_start is None:
             phase0_start = entry_marker if entry_marker is not None else now

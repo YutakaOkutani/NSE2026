@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from csmn.const import PHASE0_DROP_TO_PHASE1_DELAY_SEC, Phase
+from csmn.const import PHASE0_DROP_TO_PHASE1_DELAY_SEC, PHASE0_IMPACT_CONFIRM_SAMPLES, Phase
 from csmn.phs.p0 import Phase0Handler
 
 
@@ -27,6 +27,9 @@ class _FakeController:
         self.phase0_entry_marker = None
         self.phase0_initial_alt = None
         self.phase0_drop_detect_time = None
+        self.phase0_drop_detect_reason = None
+        self.phase0_acc_baseline = None
+        self.phase0_impact_confirm_count = 0
         self.phase0_wait_log_counter = 0
         self.time_phase1_start = None
         self.bmp_last_valid_time = 0.0
@@ -74,14 +77,46 @@ class Phase0DetectionTest(unittest.TestCase):
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertIsNotNone(self.ctrl.time_phase1_start)
 
-    def test_transitions_on_fall_magnitude_with_valid_acc(self):
+    def test_latches_impact_after_confirmation_and_delay(self):
         self.ctrl.bno_last_acc_time = time.time()
         self.ctrl.bno_acc_stale_sec = 0.0
+        self.ctrl.phase0_entry_marker = self.ctrl.phase_entry_time
+        self.ctrl.phase0_acc_baseline = 9.8
 
-        self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 35.0})
+        for _ in range(PHASE0_IMPACT_CONFIRM_SAMPLES):
+            self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 18.0})
+        self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE0))
+
+        self.ctrl.phase0_drop_detect_time = time.time() - PHASE0_DROP_TO_PHASE1_DELAY_SEC
+        self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 18.0})
 
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertIsNotNone(self.ctrl.time_phase1_start)
+
+    def test_latched_impact_survives_return_to_stationary_during_delay(self):
+        self.ctrl.bno_last_acc_time = time.time()
+        self.ctrl.bno_acc_stale_sec = 0.0
+        self.ctrl.phase0_entry_marker = self.ctrl.phase_entry_time
+        self.ctrl.phase0_acc_baseline = 9.8
+
+        for _ in range(PHASE0_IMPACT_CONFIRM_SAMPLES):
+            self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 18.0})
+        self.assertEqual(self.ctrl.phase0_drop_detect_reason, "impact")
+
+        self.ctrl.phase0_drop_detect_time = time.time() - PHASE0_DROP_TO_PHASE1_DELAY_SEC
+        self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 9.8})
+
+        self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
+
+    def test_stationary_gravity_does_not_trigger_impact(self):
+        self.ctrl.bno_last_acc_time = time.time()
+        self.ctrl.bno_acc_stale_sec = 0.0
+
+        for _ in range(PHASE0_IMPACT_CONFIRM_SAMPLES + 3):
+            self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 9.8})
+
+        self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE0))
+        self.assertIsNone(self.ctrl.phase0_drop_detect_time)
 
 
 if __name__ == "__main__":
