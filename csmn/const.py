@@ -234,6 +234,18 @@ LED_SIGNAL_COUNT = 3
 LED_TIMEOUT_ALERT_FLASH_COUNT = 24
 LED_TIMEOUT_ALERT_FAST_SLEEP = 0.08
 
+# Radio control for launch-day drone interference prevention.
+# Disabled by default. Enable only from the systemd mission environment.
+RADIO_CONTROL_ENV_KEY = "CANSAT_RADIO_CONTROL"
+RADIO_CONTROL_MISSION_VALUE = "mission"
+RADIO_RESTORE_TIMEOUT_ENV_KEY = "CANSAT_RADIO_RESTORE_TIMEOUT_SEC"
+RADIO_PRE_OFF_DELAY_ENV_KEY = "CANSAT_RADIO_PRE_OFF_DELAY_SEC"
+RADIO_USE_SUDO_ENV_KEY = "CANSAT_RADIO_USE_SUDO"
+RADIO_DRY_RUN_ENV_KEY = "CANSAT_RADIO_DRY_RUN"
+RADIO_RESTORE_TIMEOUT_SEC = TIMEOUT_PHASE_0
+RADIO_PRE_OFF_DELAY_SEC = 3.0
+RADIO_COMMAND_TIMEOUT_SEC = 10.0
+
 # モーター・センサーのGPIO関連定数
 # Motor mapping (fixed): MTR1=LEFT, MTR2=RIGHT
 PIN_EN1 = 12
@@ -443,4 +455,7 @@ LOG_HEADER = [
     "MissionEndReason",
     "MissionTotalTimeout",
     "MissionElapsedSec",
+    "RadioDisabled",
+    "RadioLastEvent",
+    "RadioRestoreDeadlineElapsedSec",
 ]

@@ -109,6 +109,10 @@ class SensorManager:
         mission_elapsed_sec = 0.0
         if mission_start:
             mission_elapsed_sec = max(0.0, time.time() - mission_start)
+        radio_restore_deadline = getattr(self, "radio_restore_deadline", None)
+        radio_restore_deadline_elapsed_sec = 0.0
+        if mission_start and radio_restore_deadline is not None:
+            radio_restore_deadline_elapsed_sec = max(0.0, radio_restore_deadline - mission_start)
 
         acc = self._snapshot_vec3(current_data, "acc")
         gyro = self._snapshot_vec3(current_data, "gyro")
@@ -177,6 +181,9 @@ class SensorManager:
             str(getattr(self, "mission_end_reason", "RUNNING")),
             self._coerce_int(bool(getattr(self, "mission_total_timeout_triggered", False))),
             f"{self._coerce_float(mission_elapsed_sec):.2f}",
+            self._coerce_int(bool(getattr(self, "radio_disabled", False))),
+            str(getattr(self, "radio_last_event", "")),
+            f"{self._coerce_float(radio_restore_deadline_elapsed_sec):.2f}",
         ]
 
     def _append_log_row(self, writer, file_obj):

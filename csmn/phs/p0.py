@@ -139,6 +139,9 @@ class Phase0Handler(BasePhaseHandler):
             elif now - controller.phase0_drop_detect_time >= PHASE0_DROP_TO_PHASE1_DELAY_SEC:
                 reason = getattr(controller, "phase0_drop_detect_reason", None) or detect_reason
                 print(f"Phase0 release hold complete ({reason}: {detect_detail}) -> Phase1")
+                restore_radio = getattr(controller, "restore_mission_radio", None)
+                if callable(restore_radio):
+                    restore_radio(f"phase0_release_{reason}")
                 controller.st.update_navigation(phase=int(Phase.PHASE1))
                 controller.time_phase1_start = now
                 return
@@ -152,6 +155,9 @@ class Phase0Handler(BasePhaseHandler):
             phase0_start = entry_marker if entry_marker is not None else now
             if now - phase0_start > TIMEOUT_PHASE_0:
                 print("Phase0 TIMEOUT: Force proceed (Sensor failure?)")
+                restore_radio = getattr(controller, "restore_mission_radio", None)
+                if callable(restore_radio):
+                    restore_radio("phase0_timeout")
                 controller.st.update_navigation(phase=int(Phase.PHASE1))
                 controller.time_phase1_start = now
 

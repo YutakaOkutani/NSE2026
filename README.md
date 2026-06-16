@@ -187,11 +187,9 @@ cd NSE2026
 各 Raspberry Pi で、リポジトリ直下に `machine.txt` を作成する。1号機なら `unit1`、2号機なら `unit2` を1行で書く。
 
 ```bash
-# 1号機の場合
-echo unit1 > machine.txt
-
-# 2号機の場合
-echo unit2 > machine.txt
+cd ~/NSE2026
+cp machine.txt.example machine.txt
+nano machine.txt
 ```
 
 `machine.txt` がない場合、引数なし実行は `common` 扱いになる。`--machine unit1` のように明示指定した場合は、`machine.txt` より引数が優先される。
@@ -403,6 +401,9 @@ WorkingDirectory=/home/pi/NSE2026
 # ログを journald に即時反映しやすくする（print が遅延しにくい）
 Environment=PYTHONUNBUFFERED=1
 
+# 本番時の Wi-Fi 停止/復帰など、日ごとに切り替える設定は別ファイルに置く
+EnvironmentFile=/home/pi/NSE2026/mission.env
+
 # venv を使う場合は venv の python を使う（activate は不要）
 # ※ パスは必ず実環境に合わせる
 ExecStart=/home/pi/NSE2026/venv/bin/python /home/pi/NSE2026/main.py
@@ -428,6 +429,7 @@ WantedBy=multi-user.target
 * `venv` を使う場合、`source venv/bin/activate` は不要。`ExecStart` に venv の Python を直接書くのが `systemd` の定石
 * `Restart=on-failure` はクラッシュ時に再起動し、`sudo systemctl stop cansat.service` のような手動停止時は再起動しないので運用しやすい
 * 通信を使わない構成なら `network-online.target` は必須ではないが、将来の通知機能などを考えると入れておく方が無難
+* `mission.env` の作り方と Wi-Fi 停止/復帰試験は `docs/radio_control.md` を参照する
 
 #### 4. `cansat.timer` の作成（起動から5分後に開始する）（任意）
 

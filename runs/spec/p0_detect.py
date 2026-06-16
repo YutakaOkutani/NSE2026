@@ -1,5 +1,11 @@
+import sys
 import time
 import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from csmn.const import PHASE0_DROP_TO_PHASE1_DELAY_SEC, PHASE0_IMPACT_CONFIRM_SAMPLES, Phase
 from csmn.phs.p0 import Phase0Handler
@@ -32,6 +38,7 @@ class _FakeController:
         self.phase0_impact_confirm_count = 0
         self.phase0_wait_log_counter = 0
         self.time_phase1_start = None
+        self.radio_restore_reasons = []
         self.bmp_last_valid_time = 0.0
         self.bmp_stale_sec = 99.0
         self.bno_last_acc_time = 0.0
@@ -40,6 +47,10 @@ class _FakeController:
 
     def toggle_led(self, *_args, **_kwargs):
         return None
+
+    def restore_mission_radio(self, reason):
+        self.radio_restore_reasons.append(reason)
+        return True
 
 
 class Phase0DetectionTest(unittest.TestCase):
@@ -76,6 +87,7 @@ class Phase0DetectionTest(unittest.TestCase):
 
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertIsNotNone(self.ctrl.time_phase1_start)
+        self.assertEqual(self.ctrl.radio_restore_reasons, ["phase0_release_altitude"])
 
     def test_latches_impact_after_confirmation_and_delay(self):
         self.ctrl.bno_last_acc_time = time.time()
@@ -92,6 +104,16 @@ class Phase0DetectionTest(unittest.TestCase):
 
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertIsNotNone(self.ctrl.time_phase1_start)
+        self.assertEqual(self.ctrl.radio_restore_reasons, ["phase0_release_impact"])
+
+    def test_restores_radio_on_phase0_timeout(self):
+        self.ctrl.phase0_entry_marker = self.ctrl.phase_entry_time
+        self.ctrl.phase_entry_time = time.time() - 999.0
+
+        self.handler.execute(self.ctrl, {"alt": 0.0, "fall": 0.0})
+
+        self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
+        self.assertEqual(self.ctrl.radio_restore_reasons, ["phase0_timeout"])
 
     def test_latched_impact_survives_return_to_stationary_during_delay(self):
         self.ctrl.bno_last_acc_time = time.time()

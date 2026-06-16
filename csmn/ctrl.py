@@ -35,7 +35,7 @@ from csmn.const import (
     PHASE2_STAGE_STRAIGHT,
     Phase,
 )
-from csmn.mgr import HardwareManager, LedManager, MotorManager, SensorManager
+from csmn.mgr import HardwareManager, LedManager, MotorManager, RadioManager, SensorManager
 from csmn.phs import (
     Phase0Handler,
     Phase1Handler,
@@ -49,7 +49,7 @@ from csmn.phs import (
 from csmn.st import CanSatState
 
 
-class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager):
+class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager, RadioManager):
     @staticmethod
     def _build_run_stem(now_time):
         return LOG_PREFIX + now_time.strftime(LOG_FILE_DATETIME_FORMAT) + f"-{now_time.microsecond:06d}"
@@ -165,6 +165,11 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
         self.mission_end_reason = "RUNNING"
         self.mission_total_timeout_triggered = False
         self._shutdown_requested = False
+        self.radio_control_mode = ""
+        self.radio_disabled = False
+        self.radio_disable_time = None
+        self.radio_restore_deadline = None
+        self.radio_last_event = "not_configured"
 
         self.phase_handlers = {
             Phase.PHASE0: Phase0Handler(),
@@ -185,6 +190,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
             self.mission_end_reason = reason
         if self.phase7_arrival_reason == "RUNNING" and self.st.snapshot().get("phase") == int(Phase.PHASE7):
             self.phase7_arrival_reason = self._resolve_phase7_arrival_reason()
+        try:
+            self.restore_mission_radio(f"shutdown_{reason}")
+        except Exception as exc:
+            print(f"Radio restore on shutdown failed: {exc}")
         try:
             self.stop_motors()
         except Exception as exc:
@@ -212,6 +221,8 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
     def initialize_phase(self, phase):
         phase_enum = Phase(phase)
         now = time.time()
+        if phase_enum != Phase.PHASE0:
+            self.restore_mission_radio(f"enter_{phase_enum.name.lower()}")
         if self.mission_start_time is None:
             self.mission_start_time = now
         self.last_phase_observed = phase_enum
@@ -297,6 +308,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
     def run(self, start_phase=Phase.PHASE0, allowed_phases=None):
         self.setup_hardware()
         self.signal_led(LED_SIGNAL_COUNT)
+        self.prepare_mission_radio_control(start_phase)
         self.initialize_phase(start_phase)
         allowed_set = None
         if allowed_phases is not None:
@@ -320,16 +332,20 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager)
             self.request_shutdown("RUN_EXIT")
 
     def loop_once(self):
+        self.check_radio_failsafe()
         snapshot = self.st.snapshot()
         phase = Phase(snapshot["phase"])
         self._sync_phase_time_tracking(phase)
         if self._handle_timeout_transitions(phase):
+            self.check_radio_failsafe()
             return
         self.led_blink_timer += 1
         handler = self.phase_handlers.get(phase)
         if handler is not None:
             handler.execute(self, snapshot)
             post_phase = Phase(self.st.snapshot()["phase"])
+            if phase == Phase.PHASE0 and post_phase != Phase.PHASE0:
+                self.restore_mission_radio(f"phase0_to_{post_phase.name.lower()}")
             self._sync_phase_time_tracking(post_phase)
 
     def _angle_diff_deg(self, target_deg, current_deg):
