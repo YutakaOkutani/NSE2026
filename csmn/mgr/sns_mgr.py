@@ -122,6 +122,14 @@ class SensorManager:
         motor_cmd_updated_elapsed_sec = 0.0
         if mission_start and motor_cmd_updated_ms > 0:
             motor_cmd_updated_elapsed_sec = max(0.0, (motor_cmd_updated_ms / 1000.0) - mission_start)
+        bno_acc_updated_elapsed_sec = 0.0
+        bno_last_acc_time = self._coerce_float(getattr(self, "bno_last_acc_time", 0.0))
+        if mission_start and bno_last_acc_time > 0.0:
+            bno_acc_updated_elapsed_sec = max(0.0, bno_last_acc_time - mission_start)
+        bmp_updated_elapsed_sec = 0.0
+        bmp_last_valid_time = self._coerce_float(getattr(self, "bmp_last_valid_time", 0.0))
+        if mission_start and bmp_last_valid_time > 0.0:
+            bmp_updated_elapsed_sec = max(0.0, bmp_last_valid_time - mission_start)
 
         return [
             str(getattr(self, "machine_name", "common")),
@@ -164,6 +172,7 @@ class SensorManager:
                 )
             ),
             f"{self._coerce_float(getattr(self, 'bno_acc_stale_sec', 0.0)):.2f}",
+            f"{bno_acc_updated_elapsed_sec:.2f}",
             self._coerce_int(
                 bool(
                     getattr(self, "bmp_last_valid_time", 0.0) > 0.0
@@ -171,6 +180,7 @@ class SensorManager:
                 )
             ),
             f"{self._coerce_float(getattr(self, 'bmp_stale_sec', 0.0)):.2f}",
+            f"{bmp_updated_elapsed_sec:.2f}",
             str(motor_cmd.get("type", "")),
             f"{motor_cmd_updated_elapsed_sec:.2f}",
             f"{self._coerce_float(motor_cmd.get('motor1_speed', 0.0)):.2f}",
@@ -469,6 +479,8 @@ class SensorManager:
             self._mark_bmp_stale()
             return None
         try:
+            # BMP180 pressure compensation depends on the latest temperature read.
+            bmp_instance.getTemperature()
             pres = float(bmp_instance.getPressure())
             if not self._scalar_within(pres, BMP_PRESSURE_MIN_VALID, BMP_PRESSURE_MAX_VALID):
                 self._mark_bmp_stale()

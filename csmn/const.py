@@ -33,7 +33,7 @@ TIMEOUT_PHASE_5 = 45
 # Phase4タイムアウト起因でPhase5へ入った場合は、
 # 視覚未検出のまま長時間走行するリスクが高いため短縮する。
 TIMEOUT_PHASE_5_AFTER_PHASE4_TIMEOUT = 20
-DATA_SAMPLING_RATE = 0.06
+DATA_SAMPLING_RATE = 0.20
 PHASE6_RAM_SPEED = 25
 PHASE6_RAM_DURATION_SEC = 2.5
 
@@ -443,8 +443,10 @@ LOG_HEADER = [
     "BNOStaleSec",
     "BNOAccValid",
     "BNOAccStaleSec",
+    "BNOAccUpdatedElapsedSec",
     "BMPValid",
     "BMPStaleSec",
+    "BMPUpdatedElapsedSec",
     "MotorCmdType",
     "MotorCmdUpdatedElapsedSec",
     "Motor1CmdSpeed",

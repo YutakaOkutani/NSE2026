@@ -65,6 +65,17 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["RadioLastEvent"], "disabled:phase0_start")
         self.assertEqual(by_name["RadioRestoreDeadlineElapsedSec"], "30.00")
 
+    def test_sensor_update_elapsed_columns_are_written_to_log_row(self):
+        ctrl = _LogOnlyController()
+        ctrl.bno_last_acc_time = 101.25
+        ctrl.bmp_last_valid_time = 102.5
+
+        row = ctrl._build_log_row()
+        by_name = dict(zip(LOG_HEADER, row))
+
+        self.assertEqual(by_name["BNOAccUpdatedElapsedSec"], "1.25")
+        self.assertEqual(by_name["BMPUpdatedElapsedSec"], "2.50")
+
 
 if __name__ == "__main__":
     unittest.main()
