@@ -80,6 +80,17 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["BNOAccUpdatedElapsedSec"], "1.25")
         self.assertEqual(by_name["BMPUpdatedElapsedSec"], "2.50")
 
+    def test_phase0_exit_columns_are_written_to_log_row(self):
+        ctrl = _LogOnlyController()
+        ctrl.phase0_exit_reason = "impact"
+        ctrl.phase0_exit_detail = "delta=8.20"
+
+        row = ctrl._build_log_row()
+        by_name = dict(zip(LOG_HEADER, row))
+
+        self.assertEqual(by_name["Phase0ExitReason"], "impact")
+        self.assertEqual(by_name["Phase0ExitDetail"], "delta=8.20")
+
 
 if __name__ == "__main__":
     unittest.main()

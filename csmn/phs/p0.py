@@ -33,6 +33,8 @@ class Phase0Handler(BasePhaseHandler):
             controller.phase0_initial_alt = None
             controller.phase0_drop_detect_time = None
             controller.phase0_drop_detect_reason = None
+            controller.phase0_exit_reason = ""
+            controller.phase0_exit_detail = ""
             controller.phase0_acc_baseline = None
             controller.phase0_impact_confirm_count = 0
             controller.phase0_wait_log_counter = 0
@@ -138,6 +140,11 @@ class Phase0Handler(BasePhaseHandler):
                 )
             elif now - controller.phase0_drop_detect_time >= PHASE0_DROP_TO_PHASE1_DELAY_SEC:
                 reason = getattr(controller, "phase0_drop_detect_reason", None) or detect_reason
+                controller.phase0_exit_reason = reason
+                controller.phase0_exit_detail = detect_detail
+                phase0_start = entry_marker if entry_marker is not None else now
+                phase0_elapsed = max(0.0, now - phase0_start)
+                print(f"PHASE0_EXIT reason={reason} elapsed={phase0_elapsed:.2f}s detail={detect_detail}")
                 print(f"Phase0 release hold complete ({reason}: {detect_detail}) -> Phase1")
                 restore_radio = getattr(controller, "restore_mission_radio", None)
                 if callable(restore_radio):
@@ -154,6 +161,10 @@ class Phase0Handler(BasePhaseHandler):
         if controller.time_phase1_start is None:
             phase0_start = entry_marker if entry_marker is not None else now
             if now - phase0_start > TIMEOUT_PHASE_0:
+                detail = f"elapsed={now - phase0_start:.2f}s timeout={TIMEOUT_PHASE_0:.2f}s"
+                controller.phase0_exit_reason = "timeout"
+                controller.phase0_exit_detail = detail
+                print(f"PHASE0_EXIT reason=timeout detail={detail}")
                 print("Phase0 TIMEOUT: Force proceed (Sensor failure?)")
                 restore_radio = getattr(controller, "restore_mission_radio", None)
                 if callable(restore_radio):

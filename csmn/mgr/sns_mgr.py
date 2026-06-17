@@ -13,8 +13,10 @@ from lib import cone_detect as dc
 from csmn.const import (
     BMP_ALTITUDE_MAX_VALID,
     BMP_ALTITUDE_MIN_VALID,
+    BMP_FAIL_LIMIT,
     BMP_PRESSURE_MAX_VALID,
     BMP_PRESSURE_MIN_VALID,
+    BMP_REINIT_COOLDOWN,
     BMP_SEA_LEVEL_PRESSURE_PA,
     BNO_ACC_MAX,
     BNO_ANGLE_JUMP_MAX,
@@ -147,6 +149,8 @@ class SensorManager:
             str(getattr(self, "machine_name", "common")),
             f"{mission_elapsed_sec:.2f}",
             self._coerce_int(current_data.get("phase", 0)),
+            str(getattr(self, "phase0_exit_reason", "")),
+            str(getattr(self, "phase0_exit_detail", "")),
             f"{acc[0]:.2f}",
             f"{acc[1]:.2f}",
             f"{acc[2]:.2f}",
@@ -314,6 +318,32 @@ class SensorManager:
                 print("BNO055: Reinit failed.")
         except Exception as exc:
             print(f"BNO055: Reinit error {exc}.")
+
+    def _try_reinit_bmp(self, reason="failure"):
+        now = time.time()
+        last_reinit = getattr(self, "bmp_last_reinit_time", 0.0)
+        if now - last_reinit < BMP_REINIT_COOLDOWN:
+            return
+        self.bmp_last_reinit_time = now
+        try:
+            from lib import bmp180
+
+            bmp = bmp180.BMP180(oss=3)
+            if bmp.setUp():
+                self.devices[DEVICE_BMP] = bmp
+                self.bmp_fail_count = 0
+                self._bmp_last_pressure_sample = None
+                self._bmp_same_pressure_since = now
+                print(f"BMP180: Reinitialized after {reason}.")
+            else:
+                print(f"BMP180: Reinit failed after {reason}.")
+        except Exception as exc:
+            print(f"BMP180: Reinit error after {reason}: {exc}.")
+
+    def _record_bmp_failure(self, reason):
+        self.bmp_fail_count = int(getattr(self, "bmp_fail_count", 0)) + 1
+        if self.bmp_fail_count >= BMP_FAIL_LIMIT:
+            self._try_reinit_bmp(reason)
 
     def _try_reinit_camera(self, force=False, reason=None):
         now = time.time()
@@ -506,6 +536,7 @@ class SensorManager:
         bmp_instance = self.devices.get(DEVICE_BMP)
         if bmp_instance is None:
             self._mark_bmp_stale()
+            self._record_bmp_failure("missing_device")
             return None
         try:
             # BMP180 pressure compensation depends on the latest temperature read.
@@ -513,6 +544,7 @@ class SensorManager:
             pres = float(bmp_instance.getPressure())
             if not self._scalar_within(pres, BMP_PRESSURE_MIN_VALID, BMP_PRESSURE_MAX_VALID):
                 self._mark_bmp_stale()
+                self._record_bmp_failure("pressure_out_of_range")
                 return None
             now = time.time()
             if pres == getattr(self, "_bmp_last_pressure_sample", None):
@@ -520,6 +552,7 @@ class SensorManager:
                 self._bmp_same_pressure_since = same_since
                 if now - same_since > (BNO_STALE_TIMEOUT * 5.0):
                     self._mark_bmp_stale()
+                    self._record_bmp_failure("frozen_pressure")
                     return None
             else:
                 self._bmp_last_pressure_sample = pres
@@ -528,13 +561,16 @@ class SensorManager:
             alt = 44330.0 * (1.0 - math.pow(pres / BMP_SEA_LEVEL_PRESSURE_PA, 1.0 / 5.255))
             if not self._scalar_within(alt, BMP_ALTITUDE_MIN_VALID, BMP_ALTITUDE_MAX_VALID):
                 self._mark_bmp_stale()
+                self._record_bmp_failure("altitude_out_of_range")
                 return None
 
+            self.bmp_fail_count = 0
             self.bmp_last_valid_time = now
             self.bmp_stale_sec = 0.0
             return {"alt": alt, "pres": pres, "valid": True, "stale_sec": 0.0}
         except Exception:
             self._mark_bmp_stale()
+            self._record_bmp_failure("read_exception")
             return None
 
     def get_sonar_data(self):

@@ -34,6 +34,8 @@ class _FakeController:
         self.phase0_initial_alt = None
         self.phase0_drop_detect_time = None
         self.phase0_drop_detect_reason = None
+        self.phase0_exit_reason = ""
+        self.phase0_exit_detail = ""
         self.phase0_acc_baseline = None
         self.phase0_impact_confirm_count = 0
         self.phase0_wait_log_counter = 0
@@ -88,6 +90,8 @@ class Phase0DetectionTest(unittest.TestCase):
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertIsNotNone(self.ctrl.time_phase1_start)
         self.assertEqual(self.ctrl.radio_restore_reasons, ["phase0_release_altitude"])
+        self.assertEqual(self.ctrl.phase0_exit_reason, "altitude")
+        self.assertIn("altitude_diff", self.ctrl.phase0_exit_detail)
 
     def test_latches_impact_after_confirmation_and_delay(self):
         self.ctrl.bno_last_acc_time = time.time()
@@ -105,6 +109,8 @@ class Phase0DetectionTest(unittest.TestCase):
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertIsNotNone(self.ctrl.time_phase1_start)
         self.assertEqual(self.ctrl.radio_restore_reasons, ["phase0_release_impact"])
+        self.assertEqual(self.ctrl.phase0_exit_reason, "impact")
+        self.assertIn("delta", self.ctrl.phase0_exit_detail)
 
     def test_restores_radio_on_phase0_timeout(self):
         self.ctrl.phase0_entry_marker = self.ctrl.phase_entry_time
@@ -114,6 +120,8 @@ class Phase0DetectionTest(unittest.TestCase):
 
         self.assertEqual(self.ctrl.st.phase, int(Phase.PHASE1))
         self.assertEqual(self.ctrl.radio_restore_reasons, ["phase0_timeout"])
+        self.assertEqual(self.ctrl.phase0_exit_reason, "timeout")
+        self.assertIn("timeout", self.ctrl.phase0_exit_detail)
 
     def test_latched_impact_survives_return_to_stationary_during_delay(self):
         self.ctrl.bno_last_acc_time = time.time()

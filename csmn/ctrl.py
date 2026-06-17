@@ -92,6 +92,8 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase0_initial_alt = None
         self.phase0_drop_detect_time = None
         self.phase0_drop_detect_reason = None
+        self.phase0_exit_reason = ""
+        self.phase0_exit_detail = ""
         self.phase0_acc_baseline = None
         self.phase0_impact_confirm_count = 0
         self.time_phase3_start = 0.0
@@ -123,6 +125,8 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.bno_calib = dict(DEFAULT_BNO_CALIB)
         self.bmp_last_valid_time = 0.0
         self.bmp_stale_sec = 0.0
+        self.bmp_fail_count = 0
+        self.bmp_last_reinit_time = 0.0
         self.phase2_start_time = None
         self.phase2_stage = PHASE2_STAGE_STRAIGHT
         self.phase2_stage_start = None
