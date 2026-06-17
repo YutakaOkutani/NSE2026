@@ -17,6 +17,7 @@ from csmn.const import (
     BMP_PRESSURE_MAX_VALID,
     BMP_PRESSURE_MIN_VALID,
     BMP_REINIT_COOLDOWN,
+    BMP_SAMPLING_RATE,
     BMP_SEA_LEVEL_PRESSURE_PA,
     BNO_ACC_MAX,
     BNO_ANGLE_JUMP_MAX,
@@ -558,13 +559,12 @@ class SensorManager:
                 self._record_bmp_failure("pressure_out_of_range")
                 return None
             now = time.time()
+            frozen_pressure = False
             if pres == getattr(self, "_bmp_last_pressure_sample", None):
                 same_since = getattr(self, "_bmp_same_pressure_since", now)
                 self._bmp_same_pressure_since = same_since
                 if now - same_since > (BNO_STALE_TIMEOUT * 5.0):
-                    self._mark_bmp_stale()
-                    self._record_bmp_failure("frozen_pressure")
-                    return None
+                    frozen_pressure = True
             else:
                 self._bmp_last_pressure_sample = pres
                 self._bmp_same_pressure_since = now
@@ -575,7 +575,10 @@ class SensorManager:
                 self._record_bmp_failure("altitude_out_of_range")
                 return None
 
-            self.bmp_fail_count = 0
+            if frozen_pressure:
+                self._record_bmp_failure("frozen_pressure")
+            else:
+                self.bmp_fail_count = 0
             self.bmp_last_valid_time = now
             self.bmp_stale_sec = 0.0
             return {"alt": alt, "pres": pres, "temp": temp, "valid": True, "stale_sec": 0.0}
@@ -899,6 +902,7 @@ class SensorManager:
 
     def bno_thread(self):
         suspicious_bno_counter = 0
+        next_bmp_read = 0.0
         while True:
             bno_data = None
             try:
@@ -942,22 +946,25 @@ class SensorManager:
                 self.st.update_imu(angle_valid=False)
                 self._mark_bno_acc_stale()
 
+            now = time.time()
+            if now >= next_bmp_read:
+                next_bmp_read = now + max(float(BMP_SAMPLING_RATE), float(DATA_SAMPLING_RATE))
+                try:
+                    bmp_data = self.get_bmp_data()
+                except Exception as exc:
+                    print(f"BMP Thread Slice Error: {exc}")
+                    traceback.print_exc()
+                    bmp_data = None
+                if bmp_data:
+                    self.st.update_barometer(
+                        alt=bmp_data["alt"],
+                        pres=bmp_data["pres"],
+                    )
+
             time.sleep(DATA_SAMPLING_RATE)
 
-    def bmp_sonar_thread(self):
+    def sonar_thread(self):
         while True:
-            try:
-                bmp_data = self.get_bmp_data()
-            except Exception as exc:
-                print(f"BMP Thread Slice Error: {exc}")
-                traceback.print_exc()
-                bmp_data = None
-            if bmp_data:
-                self.st.update_barometer(
-                    alt=bmp_data["alt"],
-                    pres=bmp_data["pres"],
-                )
-
             try:
                 sonar_dist = self.get_sonar_data()
             except Exception as exc:
@@ -970,5 +977,5 @@ class SensorManager:
 
     def data_thread(self):
         """Compatibility worker for tests or old launch scripts."""
-        threading.Thread(target=self.bmp_sonar_thread, daemon=True).start()
+        threading.Thread(target=self.sonar_thread, daemon=True).start()
         self.bno_thread()
