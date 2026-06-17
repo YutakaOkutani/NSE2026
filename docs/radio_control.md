@@ -53,11 +53,78 @@ ExecStart=/home/pi/NSE2026/venv/bin/python /home/pi/NSE2026/main.py
 Environment=CANSAT_MISSION_ENV_PATH=/home/pi/NSE2026/mission.env
 ```
 
-Wi-Fi 操作は `rfkill block wifi` / `rfkill unblock wifi` を使う。権限が足りない場合は、サービスを root で動かすか、`rfkill` だけ passwordless sudo を許可して `mission.env` に次を設定する。
+Wi-Fi 操作は `rfkill block wifi` / `rfkill unblock wifi` を使う。通常ユーザーで権限が足りない場合は、`rfkill` だけ passwordless sudo を許可して `mission.env` に次を設定する。
 
 ```bash
 CANSAT_RADIO_USE_SUDO=1
 ```
+
+## rfkill の passwordless sudo 設定
+
+`main.py` や `runs/orch/*.py` を通常ユーザーで実行したまま Wi-Fi だけを切り替えるには、`rfkill` コマンドだけをパスワードなし sudo で許可する。
+
+まず Raspberry Pi 上で `rfkill` の実パスを確認する。
+
+```bash
+command -v rfkill
+which rfkill
+```
+
+多くの Raspberry Pi OS では `/usr/sbin/rfkill` になる。環境によって `/usr/bin/rfkill` の場合もあるため、表示されたパスを sudoers に入れる。
+
+sudoers 専用ファイルを作る。
+
+```bash
+sudo visudo -f /etc/sudoers.d/cansat-rfkill
+```
+
+ユーザーが `pi` で、`rfkill` が `/usr/sbin/rfkill` の場合:
+
+```text
+pi ALL=(root) NOPASSWD: /usr/sbin/rfkill
+```
+
+両方のパスを許可しておきたい場合:
+
+```text
+pi ALL=(root) NOPASSWD: /usr/sbin/rfkill, /usr/bin/rfkill
+```
+
+ユーザー名が違う場合は `pi` を実際の実行ユーザー名に置き換える。
+
+```bash
+whoami
+```
+
+sudoers の権限を確認する。`visudo` が作った場合は通常不要だが、必要なら以下に合わせる。
+
+```bash
+sudo chmod 440 /etc/sudoers.d/cansat-rfkill
+sudo visudo -c
+```
+
+`parsed OK` が出れば構文は通っている。
+
+次に、パスワード入力なしで実行できるか確認する。
+
+```bash
+sudo -n rfkill list
+sudo -n rfkill block wifi
+sudo -n rfkill unblock wifi
+```
+
+`sudo -n` はパスワード入力が必要なときに即失敗する。ここで失敗する場合、`mission.env` の `CANSAT_RADIO_USE_SUDO=1` を使っても本番中に失敗する。
+
+確認後、`mission.env` を次のようにする。
+
+```bash
+CANSAT_RADIO_CONTROL=mission
+CANSAT_RADIO_USE_SUDO=1
+CANSAT_RADIO_DRY_RUN=0
+CANSAT_RADIO_RESTORE_TIMEOUT_SEC=30
+```
+
+この状態で `python3 main.py` または systemd 起動を行うと、コードは `sudo -n rfkill block wifi` / `sudo -n rfkill unblock wifi` を実行する。
 
 ## 動作の流れ
 
@@ -184,8 +251,9 @@ sudo systemctl status cansat.service
 - CSVの `RadioControlMode` が `mission` か確認する。`off` や空なら、Wi-Fi停止は意図通り無効化されている。
 - CSVの `RadioConfigSource` が `process_env` または `mission_env:...` か確認する。
 - `CANSAT_RADIO_DRY_RUN=1` のまま本番試験していないか確認する。
+- `CANSAT_RADIO_USE_SUDO=1` の場合、`sudo -n rfkill block wifi` と `sudo -n rfkill unblock wifi` が通常ユーザーで通るか確認する。
 - `rfkill unblock wifi` を手動実行する。
-- 権限エラーが出る場合は root 実行か `CANSAT_RADIO_USE_SUDO=1` と sudoers 設定を確認する。
+- 権限エラーが出る場合は `CANSAT_RADIO_USE_SUDO=1` と `/etc/sudoers.d/cansat-rfkill` の設定を確認する。
 
 本番前チェック:
 

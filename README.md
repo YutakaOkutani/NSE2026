@@ -427,6 +427,7 @@ WantedBy=multi-user.target
 * `Restart=on-failure` はクラッシュ時に再起動し、`sudo systemctl stop cansat.service` のような手動停止時は再起動しないので運用しやすい
 * 通信を使わない構成なら `network-online.target` は必須ではないが、将来の通知機能などを考えると入れておく方が無難
 * `main.py` はリポジトリ直下の `mission.env` を自動で読む。Wi-Fi 停止/復帰の切り替えと試験方法は `docs/radio_control.md` を参照する
+* 通常ユーザー実行のまま Wi-Fi を切る場合は、`rfkill` だけ passwordless sudo を許可する。手順は `docs/radio_control.md` の「rfkill の passwordless sudo 設定」を参照する
 
 #### 4. `cansat.timer` の作成（起動から5分後に開始する）（任意）
 
