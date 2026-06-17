@@ -16,6 +16,7 @@ __pycache__/
 
 # Virtual environment
 /venv
+/.venv
 
 # Visual Studio
 .vs/
