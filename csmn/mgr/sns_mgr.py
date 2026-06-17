@@ -66,6 +66,13 @@ from csmn.nav import calc_distance_and_azimuth
 
 
 class SensorManager:
+    def _get_i2c_lock(self):
+        lock = getattr(self, "i2c_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self.i2c_lock = lock
+        return lock
+
     def _transform_cone_direction_for_control(self, cone_direction):
         """Map detector X position into the rover control frame."""
         try:
@@ -309,13 +316,14 @@ class SensorManager:
             return
         self.bno_last_reinit_time = now
         try:
-            bno = bno055.BNO055()
-            if bno.setUp():
-                self.devices[DEVICE_BNO] = bno
-                self.bno_fail_count = 0
-                print("BNO055: Reinitialized after failures.")
-            else:
-                print("BNO055: Reinit failed.")
+            with self._get_i2c_lock():
+                bno = bno055.BNO055()
+                if bno.setUp():
+                    self.devices[DEVICE_BNO] = bno
+                    self.bno_fail_count = 0
+                    print("BNO055: Reinitialized after failures.")
+                else:
+                    print("BNO055: Reinit failed.")
         except Exception as exc:
             print(f"BNO055: Reinit error {exc}.")
 
@@ -328,15 +336,16 @@ class SensorManager:
         try:
             from lib import bmp180
 
-            bmp = bmp180.BMP180(oss=3)
-            if bmp.setUp():
-                self.devices[DEVICE_BMP] = bmp
-                self.bmp_fail_count = 0
-                self._bmp_last_pressure_sample = None
-                self._bmp_same_pressure_since = now
-                print(f"BMP180: Reinitialized after {reason}.")
-            else:
-                print(f"BMP180: Reinit failed after {reason}.")
+            with self._get_i2c_lock():
+                bmp = bmp180.BMP180(oss=3)
+                if bmp.setUp():
+                    self.devices[DEVICE_BMP] = bmp
+                    self.bmp_fail_count = 0
+                    self._bmp_last_pressure_sample = None
+                    self._bmp_same_pressure_since = now
+                    print(f"BMP180: Reinitialized after {reason}.")
+                else:
+                    print(f"BMP180: Reinit failed after {reason}.")
         except Exception as exc:
             print(f"BMP180: Reinit error after {reason}: {exc}.")
 
@@ -373,13 +382,14 @@ class SensorManager:
             self._mark_bno_acc_stale()
             return None
         try:
-            acc = bno_instance.getAcc()
-            gyro = bno_instance.getGyro()
-            mag = bno_instance.getMag()
-            euler = bno_instance.getEuler()
-            calib = bno_instance.getCalibrationStatus()
-            sys_status = bno_instance.getSystemStatus()
-            sys_error = bno_instance.getSystemError()
+            with self._get_i2c_lock():
+                acc = bno_instance.getAcc()
+                gyro = bno_instance.getGyro()
+                mag = bno_instance.getMag()
+                euler = bno_instance.getEuler()
+                calib = bno_instance.getCalibrationStatus()
+                sys_status = bno_instance.getSystemStatus()
+                sys_error = bno_instance.getSystemError()
 
             i2c_ok = acc["valid"] and gyro["valid"] and mag["valid"] and euler["valid"]
             if not i2c_ok:
@@ -540,8 +550,9 @@ class SensorManager:
             return None
         try:
             # BMP180 pressure compensation depends on the latest temperature read.
-            bmp_instance.getTemperature()
-            pres = float(bmp_instance.getPressure())
+            with self._get_i2c_lock():
+                temp = float(bmp_instance.getTemperature())
+                pres = float(bmp_instance.getPressure())
             if not self._scalar_within(pres, BMP_PRESSURE_MIN_VALID, BMP_PRESSURE_MAX_VALID):
                 self._mark_bmp_stale()
                 self._record_bmp_failure("pressure_out_of_range")
@@ -567,7 +578,7 @@ class SensorManager:
             self.bmp_fail_count = 0
             self.bmp_last_valid_time = now
             self.bmp_stale_sec = 0.0
-            return {"alt": alt, "pres": pres, "valid": True, "stale_sec": 0.0}
+            return {"alt": alt, "pres": pres, "temp": temp, "valid": True, "stale_sec": 0.0}
         except Exception:
             self._mark_bmp_stale()
             self._record_bmp_failure("read_exception")

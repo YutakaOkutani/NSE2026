@@ -3,6 +3,7 @@ import math
 import os
 import time
 import csv
+import threading
 
 from csmn.const import (
     CAMERA_CONTROL_INVERT_X,
@@ -84,6 +85,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.capture_reached_path = os.path.join(self.run_dir, self.run_stem + "_capture_reached.png")
 
         self.devices = {key: None for key in DEVICE_KEYS}
+        self.i2c_lock = threading.RLock()
         self.led_blink_timer = 0
         self.searching_flag = False
         self.count_cone_lost = 0
