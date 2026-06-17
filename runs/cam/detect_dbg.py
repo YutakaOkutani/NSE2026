@@ -19,7 +19,7 @@ from csmn.const import (
 from csmn.mgr.hw_mgr import HardwareManager
 from lib import cone_detect as dc
 
-DEFAULT_OUT_BASE = PROJECT_ROOT / "runs" / "log"
+DEFAULT_OUT_BASE = Path("/home/pi/logs_nse2026")
 WINDOW_NAME = "Detector Debug (Production cone_detect.py)"
 
 
@@ -57,7 +57,7 @@ def build_parser():
         "--outdir",
         type=str,
         default="",
-        help="Output directory. Default: /home/pi/TRC2026/runs/log/camera_debug_<timestamp>.",
+        help="Output directory. Default: /home/pi/logs_nse2026/camera_debug_<timestamp>.",
     )
     return parser
 

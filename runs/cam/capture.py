@@ -7,7 +7,7 @@ from picamera2 import Picamera2
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "runs" / "log"
+DEFAULT_OUTPUT_DIR = Path("/home/pi/logs_nse2026")
 
 
 def build_parser():
@@ -37,7 +37,7 @@ def build_parser():
     parser.add_argument(
         "--outdir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="Base output directory (default: ./runs/log). A run subfolder is created automatically.",
+        help="Base output directory (default: /home/pi/logs_nse2026). A run subfolder is created automatically.",
     )
     parser.add_argument(
         "--session-name",

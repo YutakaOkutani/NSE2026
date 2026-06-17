@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEST_LOG_ROOT = PROJECT_ROOT / "runs" / "log"
+TEST_LOG_ROOT = Path("/home/pi/logs_nse2026")
 MAIN_PY_LIBRARY_DIR = PROJECT_ROOT / "lib"
 if not MAIN_PY_LIBRARY_DIR.exists():
     raise FileNotFoundError(f"main.py library directory not found: {MAIN_PY_LIBRARY_DIR}")

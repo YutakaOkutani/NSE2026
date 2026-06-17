@@ -15,7 +15,7 @@ class Phase(IntEnum):
     PHASE7 = 7
 
 # ログ関連定数
-LOG_DIR = "./log"
+LOG_DIR = "/home/pi/logs_nse2026/common"
 LOG_PREFIX = "robust_log_"
 LOG_FILE_DATETIME_FORMAT = "%Y-%m%d-%H%M%S"
 
@@ -147,7 +147,7 @@ CAMERA_TEMPORAL_DIR_FILTER_ALPHA = 0.45
 
 # ロゴ保存パス
 # ROI画像はホーム配下の固定パスを常に参照する
-ROI_CAPTURE_DIR = os.path.expanduser("~/library/log")
+ROI_CAPTURE_DIR = "/home/pi/logs_nse2026/roi"
 ROI_PATH_1 = os.path.join(ROI_CAPTURE_DIR, "captured_roi_img.png")
 # 後方互換のため残すが、実体は同一ファイルを指す
 ROI_PATH_2 = ROI_PATH_1
@@ -238,6 +238,7 @@ LED_TIMEOUT_ALERT_FAST_SLEEP = 0.08
 # Disabled by default. Enable only from the systemd mission environment.
 RADIO_CONTROL_ENV_KEY = "CANSAT_RADIO_CONTROL"
 RADIO_CONTROL_MISSION_VALUE = "mission"
+RADIO_MISSION_ENV_PATH_ENV_KEY = "CANSAT_MISSION_ENV_PATH"
 RADIO_RESTORE_TIMEOUT_ENV_KEY = "CANSAT_RADIO_RESTORE_TIMEOUT_SEC"
 RADIO_PRE_OFF_DELAY_ENV_KEY = "CANSAT_RADIO_PRE_OFF_DELAY_SEC"
 RADIO_USE_SUDO_ENV_KEY = "CANSAT_RADIO_USE_SUDO"
@@ -458,6 +459,8 @@ LOG_HEADER = [
     "MissionTotalTimeout",
     "MissionElapsedSec",
     "RadioDisabled",
+    "RadioControlMode",
     "RadioLastEvent",
+    "RadioConfigSource",
     "RadioRestoreDeadlineElapsedSec",
 ]

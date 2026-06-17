@@ -401,9 +401,6 @@ WorkingDirectory=/home/pi/NSE2026
 # ログを journald に即時反映しやすくする（print が遅延しにくい）
 Environment=PYTHONUNBUFFERED=1
 
-# 本番時の Wi-Fi 停止/復帰など、日ごとに切り替える設定は別ファイルに置く
-EnvironmentFile=/home/pi/NSE2026/mission.env
-
 # venv を使う場合は venv の python を使う（activate は不要）
 # ※ パスは必ず実環境に合わせる
 ExecStart=/home/pi/NSE2026/venv/bin/python /home/pi/NSE2026/main.py
@@ -429,7 +426,7 @@ WantedBy=multi-user.target
 * `venv` を使う場合、`source venv/bin/activate` は不要。`ExecStart` に venv の Python を直接書くのが `systemd` の定石
 * `Restart=on-failure` はクラッシュ時に再起動し、`sudo systemctl stop cansat.service` のような手動停止時は再起動しないので運用しやすい
 * 通信を使わない構成なら `network-online.target` は必須ではないが、将来の通知機能などを考えると入れておく方が無難
-* `mission.env` の作り方と Wi-Fi 停止/復帰試験は `docs/radio_control.md` を参照する
+* `main.py` はリポジトリ直下の `mission.env` を自動で読む。Wi-Fi 停止/復帰の切り替えと試験方法は `docs/radio_control.md` を参照する
 
 #### 4. `cansat.timer` の作成（起動から5分後に開始する）（任意）
 

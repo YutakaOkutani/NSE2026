@@ -21,7 +21,7 @@ class MachineProfileResolution:
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_LOG_ROOT = _REPO_ROOT / "log"
+_DEFAULT_LOG_ROOT = Path("/home/pi/logs_nse2026")
 _MARKER_PATH = _REPO_ROOT / "machine.txt"
 
 

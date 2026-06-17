@@ -11,8 +11,7 @@ from pathlib import Path
 DEFAULT_PC_HOST = "127.0.0.1"
 DEFAULT_PC_PORT = 5001
 DEFAULT_TX_HZ = 5.0
-TELEMETRY_DIR = Path(__file__).resolve().parent
-DEFAULT_LOG_DIR = str(TELEMETRY_DIR / "logs" / "telemetry_sbc")
+DEFAULT_LOG_DIR = "/home/pi/logs_nse2026/telemetry_sbc"
 SCHEMA = "cansat.telemetry.v1"
 MAX_UDP_PAYLOAD_BYTES = 1200
 

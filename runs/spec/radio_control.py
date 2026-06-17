@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import time
 import unittest
 import importlib.util
@@ -15,6 +16,7 @@ from csmn.const import (
     DEVICE_LED_RED,
     RADIO_CONTROL_ENV_KEY,
     RADIO_DRY_RUN_ENV_KEY,
+    RADIO_MISSION_ENV_PATH_ENV_KEY,
     RADIO_PRE_OFF_DELAY_ENV_KEY,
     RADIO_RESTORE_TIMEOUT_ENV_KEY,
     Phase,
@@ -65,7 +67,10 @@ class RadioControlTest(unittest.TestCase):
             RADIO_PRE_OFF_DELAY_ENV_KEY,
             RADIO_RESTORE_TIMEOUT_ENV_KEY,
             RADIO_DRY_RUN_ENV_KEY,
+            RADIO_MISSION_ENV_PATH_ENV_KEY,
             "CANSAT_RADIO_USE_SUDO",
+            "INVOCATION_ID",
+            "JOURNAL_STREAM",
         ):
             os.environ.pop(key, None)
         self.ctrl = _FakeRadioController()
@@ -89,6 +94,45 @@ class RadioControlTest(unittest.TestCase):
         self.assertTrue(self.ctrl.radio_disabled)
         self.assertEqual(self.ctrl.commands, [["rfkill", "block", "wifi"]])
         self.assertIsNotNone(self.ctrl.radio_restore_deadline)
+
+    def test_diag_style_direct_disable_uses_process_env(self):
+        os.environ[RADIO_CONTROL_ENV_KEY] = "mission"
+
+        disabled = self.ctrl.disable_mission_radio("diag_manual")
+
+        self.assertTrue(disabled)
+        self.assertTrue(self.ctrl.radio_disabled)
+        self.assertEqual(self.ctrl.commands, [["rfkill", "block", "wifi"]])
+
+    def test_manual_run_loads_mission_env_when_process_env_missing(self):
+        with tempfile.NamedTemporaryFile("w", delete=False) as file_obj:
+            file_obj.write("CANSAT_RADIO_CONTROL=mission\n")
+            file_obj.write("CANSAT_RADIO_PRE_OFF_DELAY_SEC=0\n")
+            file_obj.write("CANSAT_RADIO_RESTORE_TIMEOUT_SEC=30\n")
+            env_path = file_obj.name
+        self.addCleanup(lambda: Path(env_path).unlink(missing_ok=True))
+        os.environ[RADIO_MISSION_ENV_PATH_ENV_KEY] = env_path
+
+        self.ctrl.prepare_mission_radio_control(Phase.PHASE0)
+
+        self.assertEqual(self.ctrl.radio_control_mode, "mission")
+        self.assertTrue(self.ctrl.radio_disabled)
+        self.assertEqual(self.ctrl.commands, [["rfkill", "block", "wifi"]])
+        self.assertTrue(self.ctrl.radio_config_source.startswith("mission_env:"))
+
+    def test_mission_env_off_keeps_radio_enabled(self):
+        with tempfile.NamedTemporaryFile("w", delete=False) as file_obj:
+            file_obj.write("CANSAT_RADIO_CONTROL=off\n")
+            env_path = file_obj.name
+        self.addCleanup(lambda: Path(env_path).unlink(missing_ok=True))
+        os.environ[RADIO_MISSION_ENV_PATH_ENV_KEY] = env_path
+
+        self.ctrl.prepare_mission_radio_control(Phase.PHASE0)
+
+        self.assertFalse(self.ctrl.radio_disabled)
+        self.assertEqual(self.ctrl.commands, [])
+        self.assertEqual(self.ctrl.radio_control_mode, "off")
+        self.assertTrue(self.ctrl.radio_config_source.startswith("mission_env:"))
 
     def test_non_phase0_start_does_not_block_wifi(self):
         os.environ[RADIO_CONTROL_ENV_KEY] = "mission"

@@ -10,8 +10,7 @@ from pathlib import Path
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 5001
-TELEMETRY_DIR = Path(__file__).resolve().parent
-DEFAULT_LOG_DIR = str(TELEMETRY_DIR / "logs" / "telemetry_pc")
+DEFAULT_LOG_DIR = "/home/pi/logs_nse2026/telemetry_pc"
 EXPECTED_SCHEMA = "cansat.telemetry.v1"
 
 

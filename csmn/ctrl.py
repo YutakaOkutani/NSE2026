@@ -55,15 +55,15 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         return LOG_PREFIX + now_time.strftime(LOG_FILE_DATETIME_FORMAT) + f"-{now_time.microsecond:06d}"
 
     @classmethod
-    def _build_unique_run_dir(cls, log_root, now_time):
+    def _build_unique_log_path(cls, log_root, now_time):
         run_stem = cls._build_run_stem(now_time)
-        run_dir = os.path.join(log_root, run_stem)
-        if not os.path.exists(run_dir):
-            return run_dir, run_stem
+        log_path = os.path.join(log_root, run_stem + ".csv")
+        if not os.path.exists(log_path):
+            return log_path, run_stem
         suffix = 1
         while True:
             candidate_stem = f"{run_stem}-{suffix}"
-            candidate = os.path.join(log_root, candidate_stem)
+            candidate = os.path.join(log_root, candidate_stem + ".csv")
             if not os.path.exists(candidate):
                 return candidate, candidate_stem
             suffix += 1
@@ -75,13 +75,13 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.target_lng = target_lng
         self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
 
-        # ログは実行単位で必ず分ける。機体別の親ディレクトリは profile 側で決める。
+        # ログCSVは親ディレクトリ直下へ実行単位のファイル名で保存する。
+        # 機体別の親ディレクトリは profile 側で決める。
         now_time = datetime.datetime.now()
         os.makedirs(LOG_DIR, exist_ok=True)
-        self.run_dir, self.run_stem = self._build_unique_run_dir(LOG_DIR, now_time)
-        os.makedirs(self.run_dir, exist_ok=True)
-        self.log_path = os.path.join(self.run_dir, self.run_stem + ".csv")
-        self.capture_reached_path = os.path.join(self.run_dir, "capture_reached.png")
+        self.log_path, self.run_stem = self._build_unique_log_path(LOG_DIR, now_time)
+        self.run_dir = LOG_DIR
+        self.capture_reached_path = os.path.join(self.run_dir, self.run_stem + "_capture_reached.png")
 
         self.devices = {key: None for key in DEVICE_KEYS}
         self.led_blink_timer = 0
@@ -170,6 +170,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.radio_disable_time = None
         self.radio_restore_deadline = None
         self.radio_last_event = "not_configured"
+        self.radio_config_source = "not_loaded"
 
         self.phase_handlers = {
             Phase.PHASE0: Phase0Handler(),

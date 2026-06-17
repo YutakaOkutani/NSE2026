@@ -192,7 +192,9 @@ class SensorManager:
             self._coerce_int(bool(getattr(self, "mission_total_timeout_triggered", False))),
             f"{self._coerce_float(mission_elapsed_sec):.2f}",
             self._coerce_int(bool(getattr(self, "radio_disabled", False))),
+            str(getattr(self, "radio_control_mode", "")),
             str(getattr(self, "radio_last_event", "")),
+            str(getattr(self, "radio_config_source", "")),
             f"{self._coerce_float(radio_restore_deadline_elapsed_sec):.2f}",
         ]
 

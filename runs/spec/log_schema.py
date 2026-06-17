@@ -43,7 +43,9 @@ class _LogOnlyController(SensorManager):
         self.mission_end_reason = "RUNNING"
         self.mission_total_timeout_triggered = False
         self.radio_disabled = True
+        self.radio_control_mode = "mission"
         self.radio_last_event = "disabled:phase0_start"
+        self.radio_config_source = "process_env"
         self.radio_restore_deadline = 130.0
 
 
@@ -62,7 +64,9 @@ class LogSchemaTest(unittest.TestCase):
         by_name = dict(zip(LOG_HEADER, row))
 
         self.assertEqual(by_name["RadioDisabled"], 1)
+        self.assertEqual(by_name["RadioControlMode"], "mission")
         self.assertEqual(by_name["RadioLastEvent"], "disabled:phase0_start")
+        self.assertEqual(by_name["RadioConfigSource"], "process_env")
         self.assertEqual(by_name["RadioRestoreDeadlineElapsedSec"], "30.00")
 
     def test_sensor_update_elapsed_columns_are_written_to_log_row(self):
