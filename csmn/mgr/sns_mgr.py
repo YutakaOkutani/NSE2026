@@ -1,6 +1,7 @@
 import csv
 import math
 import os
+import threading
 import time
 import traceback
 
@@ -105,10 +106,11 @@ class SensorManager:
     def _build_log_row(self):
         current_data = self.st.snapshot()
         motor_cmd = getattr(self, "last_motor_command", {})
+        now = time.time()
         mission_start = getattr(self, "mission_start_time", None)
         mission_elapsed_sec = 0.0
         if mission_start:
-            mission_elapsed_sec = max(0.0, time.time() - mission_start)
+            mission_elapsed_sec = max(0.0, now - mission_start)
         radio_restore_deadline = getattr(self, "radio_restore_deadline", None)
         radio_restore_deadline_elapsed_sec = 0.0
         if mission_start and radio_restore_deadline is not None:
@@ -126,10 +128,20 @@ class SensorManager:
         bno_last_acc_time = self._coerce_float(getattr(self, "bno_last_acc_time", 0.0))
         if mission_start and bno_last_acc_time > 0.0:
             bno_acc_updated_elapsed_sec = max(0.0, bno_last_acc_time - mission_start)
+        bno_acc_stale_sec = BNO_STALE_TIMEOUT + 1.0
+        if bno_last_acc_time > 0.0:
+            bno_acc_stale_sec = max(0.0, now - bno_last_acc_time)
+        bno_last_valid_time = self._coerce_float(getattr(self, "bno_last_valid_time", 0.0))
+        bno_stale_sec = BNO_STALE_TIMEOUT + 1.0
+        if bno_last_valid_time > 0.0:
+            bno_stale_sec = max(0.0, now - bno_last_valid_time)
         bmp_updated_elapsed_sec = 0.0
         bmp_last_valid_time = self._coerce_float(getattr(self, "bmp_last_valid_time", 0.0))
         if mission_start and bmp_last_valid_time > 0.0:
             bmp_updated_elapsed_sec = max(0.0, bmp_last_valid_time - mission_start)
+        bmp_stale_sec = BNO_STALE_TIMEOUT + 1.0
+        if bmp_last_valid_time > 0.0:
+            bmp_stale_sec = max(0.0, now - bmp_last_valid_time)
 
         return [
             str(getattr(self, "machine_name", "common")),
@@ -164,22 +176,22 @@ class SensorManager:
             str(current_data.get("cone_method", "")),
             f"{self._coerce_float(current_data.get('obstacle_dist', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("angle_valid", False))),
-            f"{self._coerce_float(getattr(self, 'bno_stale_sec', 0.0)):.2f}",
+            f"{bno_stale_sec:.2f}",
             self._coerce_int(
                 bool(
-                    getattr(self, "bno_last_acc_time", 0.0) > 0.0
-                    and getattr(self, "bno_acc_stale_sec", 0.0) <= BNO_STALE_TIMEOUT
+                    bno_last_acc_time > 0.0
+                    and bno_acc_stale_sec <= BNO_STALE_TIMEOUT
                 )
             ),
-            f"{self._coerce_float(getattr(self, 'bno_acc_stale_sec', 0.0)):.2f}",
+            f"{bno_acc_stale_sec:.2f}",
             f"{bno_acc_updated_elapsed_sec:.2f}",
             self._coerce_int(
                 bool(
-                    getattr(self, "bmp_last_valid_time", 0.0) > 0.0
-                    and getattr(self, "bmp_stale_sec", 0.0) <= BNO_STALE_TIMEOUT
+                    bmp_last_valid_time > 0.0
+                    and bmp_stale_sec <= BNO_STALE_TIMEOUT
                 )
             ),
-            f"{self._coerce_float(getattr(self, 'bmp_stale_sec', 0.0)):.2f}",
+            f"{bmp_stale_sec:.2f}",
             f"{bmp_updated_elapsed_sec:.2f}",
             str(motor_cmd.get("type", "")),
             f"{motor_cmd_updated_elapsed_sec:.2f}",
@@ -349,6 +361,21 @@ class SensorManager:
 
             freeze = False
             if i2c_ok:
+                signature = (
+                    tuple(acc["value"][:3]),
+                    tuple(gyro["value"][:3]),
+                    tuple(mag["value"][:3]),
+                    tuple(euler["value"][:3]),
+                )
+                now_sig = time.time()
+                if signature == getattr(self, "_bno_last_sample_signature", None):
+                    same_since = getattr(self, "_bno_same_sample_since", now_sig)
+                    self._bno_same_sample_since = same_since
+                    if now_sig - same_since > BNO_STALE_TIMEOUT:
+                        freeze = True
+                else:
+                    self._bno_last_sample_signature = signature
+                    self._bno_same_sample_since = now_sig
                 euler_zero = False
                 if euler["valid"] and len(euler["value"]) >= 1:
                     try:
@@ -363,7 +390,7 @@ class SensorManager:
                     and self._vector_near_zero(mag["value"], BNO_FREEZE_EPS)
                     and self._vector_near_zero(gyro["value"], BNO_FREEZE_EPS)
                 )
-                freeze = (
+                freeze = freeze or (
                     raw_vectors_dead
                     and euler_zero
                 )
@@ -373,7 +400,7 @@ class SensorManager:
                     self.bno_fail_count += 1
                     if self.bno_fail_count % 25 == 0:
                         print(
-                            "BNO zero-output detected: "
+                            "BNO frozen-output detected: "
                             f"acc={acc['value']} gyro={gyro['value']} mag={mag['value']} "
                             f"sys={sys_status.get('value')} err={sys_error.get('value')}"
                         )
@@ -487,13 +514,23 @@ class SensorManager:
             if not self._scalar_within(pres, BMP_PRESSURE_MIN_VALID, BMP_PRESSURE_MAX_VALID):
                 self._mark_bmp_stale()
                 return None
+            now = time.time()
+            if pres == getattr(self, "_bmp_last_pressure_sample", None):
+                same_since = getattr(self, "_bmp_same_pressure_since", now)
+                self._bmp_same_pressure_since = same_since
+                if now - same_since > (BNO_STALE_TIMEOUT * 5.0):
+                    self._mark_bmp_stale()
+                    return None
+            else:
+                self._bmp_last_pressure_sample = pres
+                self._bmp_same_pressure_since = now
 
             alt = 44330.0 * (1.0 - math.pow(pres / BMP_SEA_LEVEL_PRESSURE_PA, 1.0 / 5.255))
             if not self._scalar_within(alt, BMP_ALTITUDE_MIN_VALID, BMP_ALTITUDE_MAX_VALID):
                 self._mark_bmp_stale()
                 return None
 
-            self.bmp_last_valid_time = time.time()
+            self.bmp_last_valid_time = now
             self.bmp_stale_sec = 0.0
             return {"alt": alt, "pres": pres, "valid": True, "stale_sec": 0.0}
         except Exception:
@@ -813,7 +850,7 @@ class SensorManager:
             else:
                 time.sleep(CAMERA_IDLE_SLEEP)
 
-    def data_thread(self):
+    def bno_thread(self):
         suspicious_bno_counter = 0
         while True:
             bno_data = None
@@ -856,7 +893,12 @@ class SensorManager:
                         suspicious_bno_counter = 0
             else:
                 self.st.update_imu(angle_valid=False)
+                self._mark_bno_acc_stale()
 
+            time.sleep(DATA_SAMPLING_RATE)
+
+    def bmp_sonar_thread(self):
+        while True:
             try:
                 bmp_data = self.get_bmp_data()
             except Exception as exc:
@@ -878,3 +920,8 @@ class SensorManager:
             if sonar_dist is not None:
                 self.st.update_obstacle(obstacle_dist=sonar_dist)
             time.sleep(DATA_SAMPLING_RATE)
+
+    def data_thread(self):
+        """Compatibility worker for tests or old launch scripts."""
+        threading.Thread(target=self.bmp_sonar_thread, daemon=True).start()
+        self.bno_thread()
