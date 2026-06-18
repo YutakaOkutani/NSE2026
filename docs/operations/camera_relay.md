@@ -1,6 +1,6 @@
-# Camera Phase Relay Test
+# カメラフェーズ中継試験
 
-## Overview
+## 概要
 
 - SBC side (`relay_sbc.py`):
   - Calls `csmn/phs/p4.py`, `p5.py`, `p6.py` handlers directly for phase behavior.
@@ -13,7 +13,7 @@
   - Shows realtime camera video.
   - Plots realtime BNO055 and GPS graphs.
 
-## Resource split
+## 処理の分担
 
 - SBC:
   - Sensor I/O
@@ -24,21 +24,21 @@
   - Realtime graph rendering
   - UI/event loop
 
-## Run
+## 実行方法
 
 1. Start PC monitor:
 
 ```bash
-python3 relay_pc.py
+python3 runs/cam/relay_pc.py
 ```
 
 1. Start SBC relay:
 
 ```bash
-python3 relay_sbc.py
+python3 runs/cam/relay_sbc.py
 ```
 
-## Notes
+## 注意事項
 
 - If ROI image is missing, default red-color detection fallback is used (same as `main.py`).
 - Runtime defaults (host/port/tx rate/JPEG quality/start phase) are embedded in each script and can be changed in the constants near the top of each file.

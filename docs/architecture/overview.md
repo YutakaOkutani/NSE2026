@@ -1,10 +1,10 @@
-# NSE2026 Architecture Summary
+# NSE2026 アーキテクチャ概要
 
-このファイルは、`README.md` とは分けて管理する「リポジトリ構成・設計意図・二機体運用方針」の資料です。
+この文書は、`README.md` とは分けて管理する「リポジトリ構成・設計意図・二機体運用方針」の資料です。
 
 - `README.md`
   - 原則としてセットアップ手順、依存導入、実行コマンドの入口だけを残す。
-- `arch_summary.md`
+- `docs/architecture/overview.md`
   - ファイル構成、各ディレクトリの責務、二機体運用、共通化と固有化の境界、デバッグ運用をまとめる。
 
 ## ログ出力先早見表
@@ -34,18 +34,30 @@
 
 ```plaintext
 ├── README.md                           # セットアップ手順と基本実行コマンド
-├── arch_summary.md                    # この資料
 ├── main.py                            # 本番ミッションの入口
 ├── .gitignore                         # Git除外設定
+├── docs/                              # 設計・運用ドキュメント
+│   ├── index.md                       # ドキュメント入口
+│   ├── architecture/
+│   │   └── overview.md                # この資料
+│   ├── development/
+│   │   ├── principles.md
+│   │   ├── mission.md
+│   │   ├── testing.md
+│   │   └── components.md
+│   ├── operations/
+│   │   ├── camera_relay.md
+│   │   └── radio_control.md
+│   └── telemetry/
+│       ├── specification.md
+│       └── debugging.md
 ├── gerber/                            # 基板設計データ
 │   └── NSE2026 v2_2026-04-13.zip
 ├── anlz/                              # ログ解析
 │   ├── log.py
-│   ├── explorer.py
-│   └── DEBUG_POLICY.md
+│   └── explorer.py
 ├── csmn/                              # ミッション本体
 │   ├── __init__.py
-│   ├── arch_summary.md
 │   ├── const.py
 │   ├── ctrl.py
 │   ├── gps_util.py
@@ -53,62 +65,47 @@
 │   ├── profile.py
 │   ├── run.py
 │   ├── st.py
-│   ├── DEBUG_POLICY.md
 │   ├── mgr/
 │   │   ├── __init__.py
 │   │   ├── hw_mgr.py
 │   │   ├── led_mgr.py
 │   │   ├── mtr_mgr.py
-│   │   ├── sns_mgr.py
-│   │   └── DEBUG_POLICY.md
+│   │   ├── radio_mgr.py
+│   │   └── sns_mgr.py
 │   └── phs/
 │       ├── __init__.py
 │       ├── base.py
-│       ├── p0.py
-│       ├── p1.py
-│       ├── p2.py
-│       ├── p3.py
-│       ├── p4.py
-│       ├── p5.py
-│       ├── p6.py
-│       ├── p7.py
-│       └── DEBUG_POLICY.md
+│       └── p0.py ... p7.py
 ├── lib/                               # センサー・画像処理ライブラリ
 │   ├── __init__.py
 │   ├── bmp180.py
 │   ├── bno055.py
 │   ├── roi_capture.py
-│   ├── cone_detect.py
-│   └── DEBUG_POLICY.md
+│   └── cone_detect.py
 ├── runs/                              # デバッグ・試験・補助実行スクリプト
-│   ├── DEBUG_POLICY.md
 │   ├── cam/
 │   │   ├── capture.py
 │   │   ├── detect_dbg.py
 │   │   ├── relay_pc.py
-│   │   ├── relay.md
-│   │   ├── relay_sbc.py
-│   │   └── DEBUG_POLICY.md
+│   │   └── relay_sbc.py
 │   ├── diag/
 │   │   ├── gps.py
 │   │   ├── led.py
 │   │   ├── motor.py
-│   │   ├── sensor.py
-│   │   └── DEBUG_POLICY.md
+│   │   ├── radio.py
+│   │   └── sensor.py
 │   ├── orch/
 │   │   ├── common.py
 │   │   ├── p0_log.py
-│   │   ├── p1_p3.py
-│   │   ├── p1_p7.py
-│   │   ├── p2_p3.py
-│   │   ├── p2_p7.py
-│   │   ├── p3_p4.py
-│   │   ├── p4_p7.py
-│   │   └── DEBUG_POLICY.md
-│   └── spec/
-│       ├── p0_detect.py
-│       └── DEBUG_POLICY.md
-└── DEBUG_POLICY.md
+│   │   └── p*_p*.py
+│   ├── spec/
+│   │   ├── log_schema.py
+│   │   ├── p0_detect.py
+│   │   └── radio_control.py
+│   └── telemetry/
+│       ├── README.md
+│       ├── telemetry_pc.py
+│       └── telemetry_sbc.py
 ```
 
 ## この構成の意図
@@ -118,6 +115,21 @@
 - デバッグや個別試験は `runs/` に逃がし、本番コードを書き換えて試験しない。
 - センサーや画像処理の低レイヤは `lib/` に寄せる。
 - ログ解析は `anlz/` に分け、実機制御と切り離す。
+- 設計判断や運用手順は `docs/` に集約し、コードの各階層へ散らさない。
+
+## `csmn/` 内部の責務
+
+- `const.py`: 全機体共通の定数と閾値
+- `profile.py`: `common` / `unit1` / `unit2` の機体差分
+- `st.py`: スレッドセーフな共有状態
+- `nav.py`: 距離・方位などの副作用が少ない計算
+- `gps_util.py`: GPS 入出力と NMEA 処理
+- `ctrl.py`: 初期化、フェーズディスパッチ、実行範囲制限
+- `run.py`: `run_full_mission()`、`run_phase_sequence()`、`run_single_phase()` の入口
+- `mgr/`: ハード初期化、センサー取得、モータ、LED、無線制御
+- `phs/`: フェーズ共通インターフェースと `p0` から `p7` の状態遷移
+
+通常遷移は `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7` とし、一部フェーズは `4 -> 3` のようなフォールバックを持つ。
 
 ## ファイル命名ポリシー
 
@@ -139,7 +151,7 @@
 | `runs/cam/cam_detector_dbg.py` | `runs/cam/detect_dbg.py` | デバッグ検出入口として短縮 |
 | `runs/cam/cam_relay_pc.py` | `runs/cam/relay_pc.py` | `cam_` を省略し役割は維持 |
 | `runs/cam/cam_relay_sbc.py` | `runs/cam/relay_sbc.py` | `cam_` を省略し役割は維持 |
-| `runs/cam/cam_relay_readme.md` | `runs/cam/relay.md` | カメラ中継手順として短縮 |
+| `runs/cam/cam_relay_readme.md` | `docs/operations/camera_relay.md` | カメラ中継手順を docs に集約 |
 | `runs/orch/orch_p0_log.py` | `runs/orch/p0_log.py` | `runs/orch/` 配下なので `orch_` を省略 |
 | `runs/orch/orch_p1_p3.py` | `runs/orch/p1_p3.py` | 同上 |
 | `runs/orch/orch_p1_p7.py` | `runs/orch/p1_p7.py` | 同上 |
@@ -182,12 +194,18 @@
 
 - `README.md`
   - 環境構築、OS設定、依存導入、クローン、基本実行コマンド。
-- `arch_summary.md`
+- `docs/index.md`
+  - 目的別に各文書へ移動するための目次。
+- `docs/architecture/overview.md`
   - 構成全体の把握、設計判断、保守時の境界確認。
-- `csmn/arch_summary.md`
-  - `csmn/` 内部の責務整理と変更ルール。
-- `runs/cam/relay.md`
+- `docs/development/`
+  - 開発原則と領域別の設計・デバッグ指針。
+- `docs/operations/camera_relay.md`
   - カメラ中継試験の詳細手順。
+- `docs/operations/radio_control.md`
+  - ミッション中の Wi-Fi 停止・復帰手順。
+- `docs/telemetry/`
+  - テレメトリ仕様とデバッグ手順。
 
 ## 二機体運用の考え方
 
@@ -225,7 +243,7 @@
   - モータ左右の補正値
   - ログ保存先
   - 将来もし差が出るならGPIO割当や機体名
-- 共通化するもの
+- 共通値として扱うもの
   - カメラの制御向き補正
   - GPS方位補正、GPS座標補正
   - 目標座標の既定値

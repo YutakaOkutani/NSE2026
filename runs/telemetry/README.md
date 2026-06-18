@@ -45,4 +45,7 @@ SBC:
 - SBC 側処理は軽量に保つ
 - 映像、機体制御、フェーズ実行、モータ操作は扱わない
 
-詳細は `SPEC.md` と `DEBUG_POLICY.md` を参照する。
+詳細は次の文書を参照する。
+
+- [`docs/telemetry/specification.md`](../../docs/telemetry/specification.md)
+- [`docs/telemetry/debugging.md`](../../docs/telemetry/debugging.md)

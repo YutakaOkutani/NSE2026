@@ -196,17 +196,11 @@ nano machine.txt
 
 ---
 
-## 5.2 ドキュメントの役割分担（重複を避けるため）
+## 5.2 ドキュメント
 
-* `README.md`
-  * 原則としてセットアップ手順、依存導入、実行コマンドの入口のみを残す。
-  * 構成説明や二機体運用の考え方は同階層の `arch_summary.md` を参照する。
-* `arch_summary.md`
-  * リポジトリ全体の構成、設計意図、二機体運用、デバッグ運用。
-* `csmn/arch_summary.md`
-  * `csmn/` の内部設計と保守ルールのみ。
-* `runs/cam/relay.md`
-  * カメラ中継テスト（SBC↔PC）の手順のみ。
+セットアップと基本コマンドはこの `README.md`、設計・開発方針・運用手順は [`docs/index.md`](docs/index.md) を入口として参照する。
+
+コードフォルダには入口として必要な `README.md` だけを置き、それ以外の Markdown 文書は `docs/` 配下で管理する。
 
 ---
 
@@ -426,8 +420,8 @@ WantedBy=multi-user.target
 * `venv` を使う場合、`source venv/bin/activate` は不要。`ExecStart` に venv の Python を直接書くのが `systemd` の定石
 * `Restart=on-failure` はクラッシュ時に再起動し、`sudo systemctl stop cansat.service` のような手動停止時は再起動しないので運用しやすい
 * 通信を使わない構成なら `network-online.target` は必須ではないが、将来の通知機能などを考えると入れておく方が無難
-* `main.py` はリポジトリ直下の `mission.env` を自動で読む。Wi-Fi 停止/復帰の切り替えと試験方法は `docs/radio_control.md` を参照する
-* 通常ユーザー実行のまま Wi-Fi を切る場合は、`rfkill` だけ passwordless sudo を許可する。手順は `docs/radio_control.md` の「rfkill の passwordless sudo 設定」を参照する
+* `main.py` はリポジトリ直下の `mission.env` を自動で読む。Wi-Fi 停止/復帰の切り替えと試験方法は [`docs/operations/radio_control.md`](docs/operations/radio_control.md) を参照する
+* 通常ユーザー実行のまま Wi-Fi を切る場合は、`rfkill` だけ passwordless sudo を許可する。手順は同文書の「rfkill の passwordless sudo 設定」を参照する
 
 #### 4. `cansat.timer` の作成（起動から5分後に開始する）（任意）
 
@@ -813,7 +807,7 @@ crontab -e
 
 （初めて使う場合は、1番の nano を選択）
 
-##### 2. 一番下の行に、以下の内容を追記（起動時と5分おきに実行するように設定）
+##### 2. 一番下の行に、以下の内容を追記（起動時と5分おき（任意）に実行するように設定）
 
 ```plaintext
 @reboot ~/discord_ip.sh
