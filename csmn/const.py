@@ -226,8 +226,10 @@ MOTOR_LOOP_INTERVAL = 0.05
 MOTOR_IDLE_SLEEP = 0.1
 MOTOR_RAMP_TIME = 0.6
 MOTOR_RAMP_STEP = 0.05
+# 回転方向の反転はモーター配線の取り回しに依存するため、
+# 実機では csmn.profile の機体別設定で上書きする。
 MOTOR_DIR_INVERT_1 = False
-MOTOR_DIR_INVERT_2 = True
+MOTOR_DIR_INVERT_2 = False
 MANUAL_TURN_SPEED_RATIO = 3.0 / 5.0
 # モーター個体差補正 (PWM指令値に乗算)
 MOTOR_SPEED_SCALE_1 = 1.00
