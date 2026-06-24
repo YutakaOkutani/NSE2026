@@ -14,7 +14,7 @@
 
 ## mission.env 設定
 
-リポジトリ直下の `mission.env.example` を各機体で `mission.env` にコピーする。
+リポジトリ直下の `mission.env.example` を各機体で `mission.env` にコピーする。コピー直後の内容は安全側の初期値で、Wi-Fi 制御は無効になっている。
 
 ```bash
 cd ~/NSE2026
@@ -22,17 +22,24 @@ cp mission.env.example mission.env
 nano mission.env
 ```
 
-通常試験では以下のままにする。
+通常試験では `mission.env.example` のままにする。特に以下の値なら Wi-Fi は切れない。
 
 ```bash
 CANSAT_RADIO_CONTROL=off
 ```
 
-本番または本番相当試験だけ以下にする。
+本番または本番相当試験だけ以下に切り替える。
 
 ```bash
 CANSAT_RADIO_CONTROL=mission
 ```
+
+`mission.env.example` の標準値は次の考え方にしている。
+
+- `CANSAT_RADIO_CONTROL=off`: コピー直後は Wi-Fi を切らない安全側。
+- `CANSAT_RADIO_USE_SUDO=1`: `cansat.service` は `User=pi` で動くため、passwordless sudo 設定後の本番に合わせる。`CANSAT_RADIO_CONTROL=off` の間は使われない。
+- `CANSAT_RADIO_DRY_RUN=0`: 有効化したときは実際に `rfkill` を実行する。配線確認だけなら一時的に `1` にする。
+- `CANSAT_RADIO_RESTORE_TIMEOUT_SEC=180`: 本番向けの復帰期限。短時間の復帰試験だけ一時的に `30` などにする。
 
 `main.py` が自動で `./mission.env` を読むので、手動実行でも systemd 実行でもこのファイルだけを切り替えればよい。
 
@@ -53,7 +60,7 @@ ExecStart=/home/pi/NSE2026/venv/bin/python /home/pi/NSE2026/main.py
 Environment=CANSAT_MISSION_ENV_PATH=/home/pi/NSE2026/mission.env
 ```
 
-Wi-Fi 操作は `rfkill block wifi` / `rfkill unblock wifi` を使う。通常ユーザーで権限が足りない場合は、`rfkill` だけ passwordless sudo を許可して `mission.env` に次を設定する。
+Wi-Fi 操作は `rfkill block wifi` / `rfkill unblock wifi` を使う。`cansat.service` は通常ユーザー `pi` で動かすため、`rfkill` だけ passwordless sudo を許可する。`mission.env.example` では次の値を標準にしている。
 
 ```bash
 CANSAT_RADIO_USE_SUDO=1
@@ -62,6 +69,8 @@ CANSAT_RADIO_USE_SUDO=1
 ## rfkill の passwordless sudo 設定
 
 `main.py` や `runs/orch/*.py` を通常ユーザーで実行したまま Wi-Fi だけを切り替えるには、`rfkill` コマンドだけをパスワードなし sudo で許可する。
+
+重要: `command -v rfkill` で出る `/usr/sbin/rfkill` は「許可するコマンドの場所」であり、sudoers 設定ファイルを置く場所ではない。設定ファイルは `/etc/sudoers.d/` の下に作る。
 
 まず Raspberry Pi 上で `rfkill` の実パスを確認する。
 
@@ -72,10 +81,18 @@ which rfkill
 
 多くの Raspberry Pi OS では `/usr/sbin/rfkill` になる。環境によって `/usr/bin/rfkill` の場合もあるため、表示されたパスを sudoers に入れる。
 
-sudoers 専用ファイルを作る。
+次に、sudoers 専用ファイルを作る。ここでは `/etc/sudoers.d/cansat-rfkill` を指定する。
 
 ```bash
 sudo visudo -f /etc/sudoers.d/cansat-rfkill
+```
+
+次のようなパスは誤り。`/etc/usr/sbin/...` ではなく、必ず `/etc/sudoers.d/...` に作る。
+
+```bash
+# NG
+sudo visudo -f /etc/usr/sbin/rfkill/cansat-rfkill
+sudo visudo -f /etc/usr/sbin/rfkill.d/cansat-rfkill
 ```
 
 ユーザーが `pi` で、`rfkill` が `/usr/sbin/rfkill` の場合:
@@ -108,19 +125,38 @@ sudo visudo -c
 次に、パスワード入力なしで実行できるか確認する。
 
 ```bash
+sudo -k
 sudo -n rfkill list
+```
+
+`sudo -k` は既存の sudo 認証キャッシュを消す。`sudo -n` はパスワード入力が必要なときに即失敗する。`sudo -n rfkill list` が通れば、sudoers の基本設定はできている。
+
+Wi-Fi の停止/復帰そのものを確認する。Wi-Fi 経由の SSH で作業している場合、`block` だけを単独実行すると接続が切れて `unblock` を打てなくなるため、HDMI/キーボード、シリアルコンソール、有線LAN、または自動復帰する診断コマンドで確認する。
+
+```bash
 sudo -n rfkill block wifi
 sudo -n rfkill unblock wifi
 ```
 
-`sudo -n` はパスワード入力が必要なときに即失敗する。ここで失敗する場合、`mission.env` の `CANSAT_RADIO_USE_SUDO=1` を使っても本番中に失敗する。
+自動復帰する診断コマンドで確認する場合:
 
-確認後、`mission.env` を次のようにする。
+```bash
+python3 runs/diag/radio.py --duration 10 --use-sudo
+```
+
+ここで失敗する場合、`mission.env` の `CANSAT_RADIO_USE_SUDO=1` を使っても本番中に失敗する。
+
+設定できていれば、確認コマンドでパスワードを聞かれずに `rfkill` の状態表示や Wi-Fi の block/unblock が実行される。
+
+確認後、`mission.env` は基本的に `mission.env.example` からコピーした内容のままでよい。本番または本番相当試験では、Wi-Fi 制御を有効化するために次だけ切り替える。
 
 ```bash
 CANSAT_RADIO_CONTROL=mission
-CANSAT_RADIO_USE_SUDO=1
-CANSAT_RADIO_DRY_RUN=0
+```
+
+短時間で復帰確認したい試験だけ、復帰期限を一時的に短くする。
+
+```bash
 CANSAT_RADIO_RESTORE_TIMEOUT_SEC=30
 ```
 
@@ -159,7 +195,6 @@ systemdを使わず、手動ミッション実行でも `mission.env` だけで�
 ```bash
 # mission.env
 CANSAT_RADIO_CONTROL=mission
-CANSAT_RADIO_DRY_RUN=0
 CANSAT_RADIO_RESTORE_TIMEOUT_SEC=30
 ```
 
