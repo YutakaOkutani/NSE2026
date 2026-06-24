@@ -1,14 +1,14 @@
 import argparse
 import os
 
-from csmn.const import (
+from mission.const import (
     RADIO_CONTROL_ENV_KEY,
     RADIO_DRY_RUN_ENV_KEY,
     RADIO_PRE_OFF_DELAY_ENV_KEY,
     RADIO_RESTORE_TIMEOUT_ENV_KEY,
     RADIO_USE_SUDO_ENV_KEY,
 )
-from csmn.run import run_full_mission
+from mission.run import run_full_mission
 
 
 def parse_args():

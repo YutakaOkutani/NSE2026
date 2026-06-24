@@ -33,9 +33,11 @@
 ## ファイル構成
 
 ```plaintext
-├── README.md                           # セットアップ手順と基本実行コマンド
+├── README.md                          # セットアップ手順と基本実行コマンド
 ├── main.py                            # 本番ミッションの入口
 ├── .gitignore                         # Git除外設定
+├── mission.env.example                # ミッション環境変数のサンプル
+├── machine.txt.example                # 機体識別ファイルのサンプル
 ├── docs/                              # 設計・運用ドキュメント
 │   ├── index.md                       # ドキュメント入口
 │   ├── architecture/
@@ -53,10 +55,10 @@
 │       └── debugging.md
 ├── gerber/                            # 基板設計データ
 │   └── NSE2026 v2_2026-04-13.zip
-├── anlz/                              # ログ解析
+├── analysis/                          # ログ解析
 │   ├── log.py
 │   └── explorer.py
-├── csmn/                              # ミッション本体
+├── mission/                           # ミッション本体
 │   ├── __init__.py
 │   ├── const.py
 │   ├── ctrl.py
@@ -72,7 +74,7 @@
 │   │   ├── mtr_mgr.py
 │   │   ├── radio_mgr.py
 │   │   └── sns_mgr.py
-│   └── phs/
+│   └── phases/
 │       ├── __init__.py
 │       ├── base.py
 │       └── p0.py ... p7.py
@@ -111,13 +113,13 @@
 ## この構成の意図
 
 - `main.py` は本番入口だけにする。
-- 本番ロジックは `csmn/` に寄せる。
+- 本番ロジックは `mission/` に寄せる。
 - デバッグや個別試験は `runs/` に逃がし、本番コードを書き換えて試験しない。
 - センサーや画像処理の低レイヤは `lib/` に寄せる。
-- ログ解析は `anlz/` に分け、実機制御と切り離す。
+- ログ解析は `analysis/` に分け、実機制御と切り離す。
 - 設計判断や運用手順は `docs/` に集約し、コードの各階層へ散らさない。
 
-## `csmn/` 内部の責務
+## `mission/` 内部の責務
 
 - `const.py`: 全機体共通の定数と閾値
 - `profile.py`: `common` / `unit1` / `unit2` の機体差分
@@ -127,7 +129,7 @@
 - `ctrl.py`: 初期化、フェーズディスパッチ、実行範囲制限
 - `run.py`: `run_full_mission()`、`run_phase_sequence()`、`run_single_phase()` の入口
 - `mgr/`: ハード初期化、センサー取得、モータ、LED、無線制御
-- `phs/`: フェーズ共通インターフェースと `p0` から `p7` の状態遷移
+- `phases/`: フェーズ共通インターフェースと `p0` から `p7` の状態遷移
 
 通常遷移は `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7` とし、一部フェーズは `4 -> 3` のようなフォールバックを持つ。
 
@@ -143,8 +145,11 @@
 
 | 変更前 | 変更後 | 理由 |
 | --- | --- | --- |
-| `anlz/log_anlz.py` | `anlz/log.py` | `anlz/` 配下で解析用途が明確なため短縮 |
-| `anlz/explorer_map.py` | `anlz/explorer.py` | 探査再構成解析として短縮 |
+| `anlz/` | `analysis/` | 解析層であることを初見でも分かる名前にする |
+| `csmn/` | `mission/` | 本番ミッション制御のパッケージであることを明確にする |
+| `csmn/phs/` | `mission/phases/` | フェーズ処理の場所を省略なしで示す |
+| `analysis/log_analysis.py` | `analysis/log.py` | `analysis/` 配下で解析用途が明確なため短縮 |
+| `analysis/explorer_map.py` | `analysis/explorer.py` | 探査再構成解析として短縮 |
 | `lib/capture_roi_img.py` | `lib/roi_capture.py` | ROI 撮影用途を保ったまま短縮 |
 | `lib/detect_corn.py` | `lib/cone_detect.py` | 検出対象を cone として明確化 |
 | `runs/cam/cam_capture_data.py` | `runs/cam/capture.py` | `runs/cam/` 配下なので `cam_` を省略 |
@@ -163,7 +168,7 @@
 
 ## 機体判別仕様
 
-機体判別は `csmn/profile.py` の `resolve_machine_profile()` に集約する。
+機体判別は `mission/profile.py` の `resolve_machine_profile()` に集約する。
 
 判別順序:
 
@@ -185,7 +190,7 @@
 ## 今回の変更点
 
 - 長い実行ファイル名を短縮し、参照ドキュメントと import を追従した。
-- `csmn/profile.py` に機体判別処理を追加し、判別結果を本番・オーケストレーション・GPS診断・モータ診断で共通利用するようにした。
+- `mission/profile.py` に機体判別処理を追加し、判別結果を本番・オーケストレーション・GPS診断・モータ診断で共通利用するようにした。
 - `--machine` は明示上書きとして維持し、指定がない場合は `machine.txt` を読む動作へ変更した。
 - 判別不能時のフォールバックと、未知の明示指定をエラーにする条件を明文化した。
 - 機体判別と安全上重要なプロファイル適用箇所にコメントを追加した。
@@ -212,9 +217,9 @@
 二機体を同じコードベースで扱うときは、次の3層で分ける。
 
 - 共通ロジック
-  - `csmn/` のフェーズ制御、状態管理、ナビゲーション、ハード制御。
+  - `mission/` のフェーズ制御、状態管理、ナビゲーション、ハード制御。
 - 機体固有プロファイル
-  - `csmn/profile.py` に機体差分だけを置く。
+  - `mission/profile.py` に機体差分だけを置く。
   - 例: モータ補正、ログ出力先、将来のGPIO差分。
 - デバッグ入口
   - `main.py` と `runs/orch/*.py`、`runs/diag/*.py`。
@@ -289,7 +294,7 @@
 - `machine.txt` に `unit1` または `unit2` と書くと、引数なしでも機体を固定できる。
 - 目標座標は `--target-lat` / `--target-lng`、または `CANSAT_TARGET_LAT` / `CANSAT_TARGET_LNG` で上書きできる。
 - ログ出力先は `--log-dir`、または `CANSAT_LOG_DIR` で上書きできる。
-- `csmn/profile.py` の既定 `LOG_DIR` はリポジトリ基準の絶対パスになるため、systemd の `WorkingDirectory` に過度に依存しない。
+- `mission/profile.py` の既定 `LOG_DIR` はリポジトリ基準の絶対パスになるため、systemd の `WorkingDirectory` に過度に依存しない。
 
 systemd 運用で意識する点:
 
@@ -321,10 +326,10 @@ Restart=on-failure
 固有値は「どこに置くか」を先に決めてから変更する。
 
 - 機体ごとに違う既定値
-  - `csmn/profile.py`
+  - `mission/profile.py`
   - `PROFILE_REGISTRY["unit1"]`, `PROFILE_REGISTRY["unit2"]` の `const_overrides` に置く。
 - 全機体で共通の既定値
-  - `csmn/const.py`
+  - `mission/const.py`
   - まだ機体差分が不要な値はここに置く。
 - 起動時だけ一時的に上書きしたい値
   - `main.py` の引数、または環境変数で上書きする。
@@ -333,38 +338,38 @@ Restart=on-failure
 
 1. `main.py` の起動引数
 2. 環境変数
-3. `csmn/profile.py` の機体既定値
-4. `csmn/const.py` の共通既定値
+3. `mission/profile.py` の機体既定値
+4. `mission/const.py` の共通既定値
 
 機体名そのものの判別優先順位は「明示引数、`machine.txt`, `common`」である。リポジトリ直下の `machine.txt` はローカル設定として使い、Git には含めない。
 
 代表例:
 
 - 目標座標
-  - 共通の既定値: `csmn/const.py` の `TARGET_LAT`, `TARGET_LNG`
+  - 共通の既定値: `mission/const.py` の `TARGET_LAT`, `TARGET_LNG`
   - 一時変更: `--target-lat`, `--target-lng` または `CANSAT_TARGET_LAT`, `CANSAT_TARGET_LNG`
 - ログ保存先
-  - 機体ごとの既定値: `csmn/profile.py` の `LOG_DIR`
+  - 機体ごとの既定値: `mission/profile.py` の `LOG_DIR`
   - 一時変更: `--log-dir` または `CANSAT_LOG_DIR`
 - モータ補正値
-  - 機体ごとの既定値: `csmn/profile.py` の `MOTOR_SPEED_SCALE_1`, `MOTOR_SPEED_SCALE_2`, `MOTOR_SPEED_OFFSET_1`, `MOTOR_SPEED_OFFSET_2`
-  - 一時変更: 原則 `csmn/profile.py` を編集して管理する
+  - 機体ごとの既定値: `mission/profile.py` の `MOTOR_SPEED_SCALE_1`, `MOTOR_SPEED_SCALE_2`, `MOTOR_SPEED_OFFSET_1`, `MOTOR_SPEED_OFFSET_2`
+  - 一時変更: 原則 `mission/profile.py` を編集して管理する
 - カメラ向き補正、GPS補正
-  - 共通の既定値: `csmn/const.py` の `CAMERA_CONTROL_INVERT_X`, `GPS_HEADING_OFFSET`, `GPS_COORD_LAT_OFFSET_DEG`, `GPS_COORD_LNG_OFFSET_DEG`
+  - 共通の既定値: `mission/const.py` の `CAMERA_CONTROL_INVERT_X`, `GPS_HEADING_OFFSET`, `GPS_COORD_LAT_OFFSET_DEG`, `GPS_COORD_LNG_OFFSET_DEG`
 - 将来のGPIO差分
-  - 差分が本当に固定化したら `csmn/profile.py` に持たせる
-  - 共通で済むなら `csmn/const.py` のままにする
+  - 差分が本当に固定化したら `mission/profile.py` に持たせる
+  - 共通で済むなら `mission/const.py` のままにする
 
 変更の実務ルール:
 
-- 「その機体では常にそう動くべき値」は `csmn/profile.py` に入れる。
+- 「その機体では常にそう動くべき値」は `mission/profile.py` に入れる。
 - 「試験日だけ変えたい値」は起動引数か環境変数で変える。
-- 「二機体とも同じ基準で見直したい値」は `csmn/const.py` に置く。カメラ向き、GPS補正、目標座標はこの扱いにする。
+- 「二機体とも同じ基準で見直したい値」は `mission/const.py` に置く。カメラ向き、GPS補正、目標座標はこの扱いにする。
 - 値変更後は、共有デバッグか機体固有デバッグかを決めてログ保存先も対応させる。
 
 ## 保守ルール
 
-- 値の追加候補が機体差分なら、まず `csmn/profile.py` に置けないか考える。
-- 値の追加候補が全機体共通なら、`csmn/const.py` に置く。
-- フェーズ仕様の変更は `csmn/phs/` を優先して直す。
+- 値の追加候補が機体差分なら、まず `mission/profile.py` に置けないか考える。
+- 値の追加候補が全機体共通なら、`mission/const.py` に置く。
+- フェーズ仕様の変更は `mission/phases/` を優先して直す。
 - デバッグ手順の追加は `runs/` に置き、本番入口には混ぜない。

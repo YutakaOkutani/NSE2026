@@ -1,6 +1,6 @@
 from common import TEST_LOG_ROOT, build_phase_runner_parser, resolve_runtime_args
-from csmn.const import Phase
-from csmn.run import run_phase_sequence
+from mission.const import Phase
+from mission.run import run_phase_sequence
 
 
 def run_phase0_logging(log_subdir: str, machine_name: str = "common") -> None:

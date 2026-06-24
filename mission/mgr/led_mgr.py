@@ -1,6 +1,6 @@
 import time
 
-from csmn.const import (
+from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     LED_SIGNAL_SLEEP,

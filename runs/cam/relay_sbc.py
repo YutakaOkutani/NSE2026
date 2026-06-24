@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import (
+from mission.const import (
     CAMERA_ACTIVE_SLEEP,
     CAMERA_IDLE_SLEEP,
     CONE_PROBABILITY_THRESHOLD_PHASE4,
@@ -47,9 +47,9 @@ from csmn.const import (
     HEADING_WEIGHT_GPS,
     Phase,
 )
-from csmn.mgr import HardwareManager, LedManager, MotorManager, SensorManager
-from csmn.phs import Phase4Handler, Phase5Handler, Phase6Handler, Phase7Handler
-from csmn.st import CanSatState
+from mission.mgr import HardwareManager, LedManager, MotorManager, SensorManager
+from mission.phases import Phase4Handler, Phase5Handler, Phase6Handler, Phase7Handler
+from mission.st import CanSatState
 
 # Runtime defaults (change here when your environment changes)
 # Variable parameter: PC monitor host (receiver IP)

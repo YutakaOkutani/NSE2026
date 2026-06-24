@@ -5,7 +5,7 @@ from pathlib import Path
 import pynmea2
 import serial
 
-from csmn.const import (
+from mission.const import (
     GPS_BAUDRATE,
     GPS_BAUDRATE_CANDIDATES,
     GPS_BUFFER_CLEAR_INTERVAL,
@@ -28,7 +28,7 @@ from csmn.const import (
     NMEA_GGA_PREFIXES,
     NMEA_SENTENCE_GGA,
 )
-from csmn.nav import calc_distance_and_azimuth
+from mission.nav import calc_distance_and_azimuth
 
 
 def _is_parseable_nmea(line):

@@ -10,7 +10,7 @@ if not MAIN_PY_LIBRARY_DIR.exists():
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.profile import build_debug_log_dir, list_profiles, resolve_machine_profile
+from mission.profile import build_debug_log_dir, list_profiles, resolve_machine_profile
 
 
 def build_phase_runner_parser(description: str, default_label: str) -> argparse.ArgumentParser:

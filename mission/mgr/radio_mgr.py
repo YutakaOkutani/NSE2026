@@ -3,7 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from csmn.const import (
+from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     RADIO_COMMAND_TIMEOUT_SEC,

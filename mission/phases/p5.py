@@ -9,7 +9,7 @@ if not MAIN_PY_LIBRARY_DIR.exists():
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import (
+from mission.const import (
     CAMERA_DEAD_TIMEOUT,
     CAMERA_PHASE5_MAX_ATTEMPTS,
     CONE_LOST_COUNT_LIMIT,
@@ -24,8 +24,8 @@ from csmn.const import (
     TIMEOUT_PHASE_5_AFTER_PHASE4_TIMEOUT,
     TIMEOUT_PHASE_5,
 )
-from csmn.nav import calc_distance_and_azimuth
-from csmn.phs.base import BasePhaseHandler
+from mission.nav import calc_distance_and_azimuth
+from mission.phases.base import BasePhaseHandler
 
 PHASE5_REACH_CONFIRM_FRAMES = 8
 
@@ -147,7 +147,7 @@ class Phase5Handler(BasePhaseHandler):
 
 
 def run_standalone():
-    from csmn.run import run_single_phase
+    from mission.run import run_single_phase
 
     run_single_phase(Phase.PHASE5)
 

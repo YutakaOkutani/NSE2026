@@ -63,13 +63,13 @@ PROFILE_REGISTRY: dict[str, MachineProfile] = {
 
 
 PATCHABLE_MODULES = (
-    "csmn.const",
-    "csmn.ctrl",
-    "csmn.gps_util",
-    "csmn.mgr.hw_mgr",
-    "csmn.mgr.mtr_mgr",
-    "csmn.mgr.sns_mgr",
-    "csmn.run",
+    "mission.const",
+    "mission.ctrl",
+    "mission.gps_util",
+    "mission.mgr.hw_mgr",
+    "mission.mgr.mtr_mgr",
+    "mission.mgr.sns_mgr",
+    "mission.run",
 )
 
 
@@ -183,7 +183,7 @@ def activate_machine_profile(
     if extra_overrides:
         overrides.update(extra_overrides)
 
-    import csmn.const as mission_constants
+    import mission.const as mission_constants
 
     for key, value in overrides.items():
         setattr(mission_constants, key, value)

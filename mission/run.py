@@ -1,8 +1,8 @@
 import os
 
-from csmn import const as mission_constants
-from csmn.const import Phase
-from csmn.profile import activate_machine_profile, build_mission_log_dir, resolve_machine_profile
+from mission import const as mission_constants
+from mission.const import Phase
+from mission.profile import activate_machine_profile, build_mission_log_dir, resolve_machine_profile
 
 
 def _resolve_target(target_lat, target_lng):
@@ -40,7 +40,7 @@ def _activate_runtime(machine_name=None, log_dir=None, target_lat=None, target_l
 
 
 def run_full_mission(target_lat=None, target_lng=None, machine_name=None, log_dir=None):
-    from csmn.ctrl import CanSatController
+    from mission.ctrl import CanSatController
 
     machine_name = _activate_runtime(
         machine_name=machine_name,
@@ -54,7 +54,7 @@ def run_full_mission(target_lat=None, target_lng=None, machine_name=None, log_di
 
 
 def run_phase_sequence(start_phase, allowed_phases, target_lat=None, target_lng=None, machine_name=None, log_dir=None):
-    from csmn.ctrl import CanSatController
+    from mission.ctrl import CanSatController
 
     machine_name = _activate_runtime(
         machine_name=machine_name,

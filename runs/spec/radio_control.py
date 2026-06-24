@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import (
+from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     RADIO_CONTROL_ENV_KEY,
@@ -21,7 +21,7 @@ from csmn.const import (
     RADIO_RESTORE_TIMEOUT_ENV_KEY,
     Phase,
 )
-RADIO_MGR_PATH = PROJECT_ROOT / "csmn" / "mgr" / "radio_mgr.py"
+RADIO_MGR_PATH = PROJECT_ROOT / "mission" / "mgr" / "radio_mgr.py"
 spec = importlib.util.spec_from_file_location("radio_mgr_under_test", RADIO_MGR_PATH)
 radio_mgr_under_test = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(radio_mgr_under_test)

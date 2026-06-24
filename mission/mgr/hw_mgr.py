@@ -12,7 +12,7 @@ from gpiozero.pins.lgpio import LGPIOFactory
 from lib import bmp180, bno055
 from lib import cone_detect as dc
 
-from csmn.const import (
+from mission.const import (
     BNO_FUSION_OK_STATES,
     BNO_INIT_READY_TIMEOUT,
     BNO_INIT_SAMPLE_INTERVAL,

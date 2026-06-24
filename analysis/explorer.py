@@ -36,7 +36,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 try:
-    from csmn.const import GPS_MAX_HDOP, GPS_MIN_FIX_QUAL, GPS_MIN_SATELLITES, LOG_PREFIX, TARGET_LAT, TARGET_LNG
+    from mission.const import GPS_MAX_HDOP, GPS_MIN_FIX_QUAL, GPS_MIN_SATELLITES, LOG_PREFIX, TARGET_LAT, TARGET_LNG
 except Exception:
     GPS_MAX_HDOP = 5.0
     GPS_MIN_FIX_QUAL = 1
@@ -108,7 +108,7 @@ def ensure_runtime_dependencies() -> None:
             import numpy as _np
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
-                "numpy is required for anlz/explorer.py. Install PC-side analysis deps first."
+                "numpy is required for analysis/explorer.py. Install PC-side analysis deps first."
             ) from exc
 
         np = _np
@@ -117,7 +117,7 @@ def ensure_runtime_dependencies() -> None:
             import pandas as _pd
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
-                "pandas is required for anlz/explorer.py. Install PC-side analysis deps first."
+                "pandas is required for analysis/explorer.py. Install PC-side analysis deps first."
             ) from exc
 
         pd = _pd
@@ -125,7 +125,7 @@ def ensure_runtime_dependencies() -> None:
 
 def find_latest_log() -> Path:
     candidates: list[Path] = []
-    search_root = REPO_ROOT / "anlz" / "robust_logs"
+    search_root = REPO_ROOT / "analysis" / "robust_logs"
     if search_root.exists():
         candidates.extend(search_root.rglob(f"{LOG_PREFIX}*.csv"))
     if not candidates:
@@ -134,7 +134,7 @@ def find_latest_log() -> Path:
 
 
 def prepare_output_dir(log_path: Path, machine_name: str = UNKNOWN_MACHINE) -> Path:
-    root = REPO_ROOT / "anlz" / "explorer_outputs" / machine_name / log_path.stem
+    root = REPO_ROOT / "analysis" / "explorer_outputs" / machine_name / log_path.stem
     root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = root / f"run_{stamp}"

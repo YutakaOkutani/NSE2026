@@ -1,7 +1,7 @@
 # Analyzer generated outputs (graphs/images/csv summaries)
-anlz/outputs/
-anlz/robust_logs/
-anlz/explorer_outputs/
+analysis/outputs/
+analysis/robust_logs/
+analysis/explorer_outputs/
 
 # Python cache
 __pycache__/

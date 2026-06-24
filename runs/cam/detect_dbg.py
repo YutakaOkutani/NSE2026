@@ -12,11 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import (
+from mission.const import (
     CONE_PROBABILITY_THRESHOLD_PHASE4,
     CONE_PROBABILITY_THRESHOLD_PHASE5,
 )
-from csmn.mgr.hw_mgr import HardwareManager
+from mission.mgr.hw_mgr import HardwareManager
 from lib import cone_detect as dc
 
 DEFAULT_OUT_BASE = Path("/home/pi/logs_nse2026")

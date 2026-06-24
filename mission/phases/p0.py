@@ -5,7 +5,7 @@ import time
 if __package__ is None or __package__ == "":
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from csmn.const import (
+from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     DROP_ALTITUDE_DIFF_THRESHOLD,
@@ -19,7 +19,7 @@ from csmn.const import (
     Phase,
     TIMEOUT_PHASE_0,
 )
-from csmn.phs.base import BasePhaseHandler
+from mission.phases.base import BasePhaseHandler
 
 
 class Phase0Handler(BasePhaseHandler):

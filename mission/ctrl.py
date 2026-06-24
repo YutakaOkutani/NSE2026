@@ -5,7 +5,7 @@ import time
 import csv
 import threading
 
-from csmn.const import (
+from mission.const import (
     CAMERA_CONTROL_INVERT_X,
     DEFAULT_BNO_CALIB,
     DEFAULT_VECTOR3,
@@ -36,8 +36,8 @@ from csmn.const import (
     PHASE2_STAGE_STRAIGHT,
     Phase,
 )
-from csmn.mgr import HardwareManager, LedManager, MotorManager, RadioManager, SensorManager
-from csmn.phs import (
+from mission.mgr import HardwareManager, LedManager, MotorManager, RadioManager, SensorManager
+from mission.phases import (
     Phase0Handler,
     Phase1Handler,
     Phase2Handler,
@@ -47,7 +47,7 @@ from csmn.phs import (
     Phase6Handler,
     Phase7Handler,
 )
-from csmn.st import CanSatState
+from mission.st import CanSatState
 
 
 class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager, RadioManager):

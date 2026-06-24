@@ -5,12 +5,12 @@ import argparse
 from pathlib import Path
 
 # Allow running this file directly (e.g. `python runs/gps_diag.py`) by adding
-# the repository root to sys.path so `csmn` can be imported.
+# the repository root to sys.path so `mission` can be imported.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from csmn.profile import activate_machine_profile, list_profiles
+from mission.profile import activate_machine_profile, list_profiles
 
 
 UPDATE_INTERVAL_SECONDS = 5
@@ -31,7 +31,7 @@ def _coordinate_display(fix, value_key, text_key):
 
 
 def read_raw_nmea(duration_seconds=10.0):
-    from csmn.gps_util import open_gps_serial
+    from mission.gps_util import open_gps_serial
 
     print("=== RAW GPS INPUT PROBE ===")
     print(f"Duration: {duration_seconds}s")
@@ -81,7 +81,7 @@ def main():
     args = parse_args()
     # 診断系も本番入口と同じ機体判別を使い、補正値の当たり違いを避ける。
     activate_machine_profile(args.machine)
-    from csmn.gps_util import RobustGPSReader
+    from mission.gps_util import RobustGPSReader
 
     update_interval = max(0.5, float(args.update_interval))
 
@@ -96,7 +96,7 @@ def main():
         print("GPS monitor started without raw probe. This is the closest startup condition to mission code.")
     else:
         print("GPS monitor started after raw probe. Compare this against --skip-raw-probe to test startup warm-up effect.")
-    print("GPS monitor (csmn.gps_util). Waiting for stable fix... Ctrl+C to exit.")
+    print("GPS monitor (mission.gps_util). Waiting for stable fix... Ctrl+C to exit.")
     try:
         while True:
             fix = gps_reader.read_fix()

@@ -241,7 +241,7 @@ python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample
 python3 runs/cam/detect_dbg.py --phase 4
 
 # ログ解析（PC上で実行）
-python3 anlz/log.py
+python3 analysis/log.py
 ```
 
 ---

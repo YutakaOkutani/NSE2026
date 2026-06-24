@@ -1,6 +1,6 @@
 import threading
 
-from csmn.const import (
+from mission.const import (
     CONE_CENTER_POSITION,
     DEFAULT_FLOAT_VALUE,
     DEFAULT_OBSTACLE_DIST_CM,

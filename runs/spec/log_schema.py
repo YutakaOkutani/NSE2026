@@ -8,14 +8,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import LOG_HEADER
-from csmn.st import CanSatState
+from mission.const import LOG_HEADER
+from mission.st import CanSatState
 
 sys.modules.setdefault("serial", types.SimpleNamespace())
 sys.modules.setdefault("lib.bno055", types.SimpleNamespace())
 sys.modules.setdefault("lib.cone_detect", types.SimpleNamespace())
 sys.modules.setdefault(
-    "csmn.gps_util",
+    "mission.gps_util",
     types.SimpleNamespace(
         coerce_gga_metrics=lambda *_args, **_kwargs: None,
         gga_quality_ok=lambda *_args, **_kwargs: False,
@@ -24,7 +24,7 @@ sys.modules.setdefault(
     ),
 )
 
-SNS_MGR_PATH = PROJECT_ROOT / "csmn" / "mgr" / "sns_mgr.py"
+SNS_MGR_PATH = PROJECT_ROOT / "mission" / "mgr" / "sns_mgr.py"
 spec = importlib.util.spec_from_file_location("sns_mgr_under_test", SNS_MGR_PATH)
 sns_mgr_under_test = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sns_mgr_under_test)

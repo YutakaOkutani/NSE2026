@@ -10,7 +10,7 @@ import serial
 from lib import bno055
 from lib import cone_detect as dc
 
-from csmn.const import (
+from mission.const import (
     BMP_ALTITUDE_MAX_VALID,
     BMP_ALTITUDE_MIN_VALID,
     BMP_FAIL_LIMIT,
@@ -62,8 +62,8 @@ from csmn.const import (
     PHASES_CAMERA_ACTIVE,
     SONAR_MAX_DISTANCE,
 )
-from csmn.gps_util import coerce_gga_metrics, gga_quality_ok, open_gps_serial, parse_gga_sentence
-from csmn.nav import calc_distance_and_azimuth
+from mission.gps_util import coerce_gga_metrics, gga_quality_ok, open_gps_serial, parse_gga_sentence
+from mission.nav import calc_distance_and_azimuth
 
 
 class SensorManager:

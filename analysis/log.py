@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 try:
-    from csmn.const import LOG_HEADER
+    from mission.const import LOG_HEADER
 except Exception:
     LOG_HEADER = []
 
@@ -146,7 +146,7 @@ def write_analysis_context(out_dir: Path, *, log_path: Path, machine_name: str, 
 
 
 def find_latest_log() -> Path:
-    target_dir = REPO_ROOT / "anlz" / "robust_logs"
+    target_dir = REPO_ROOT / "analysis" / "robust_logs"
     candidates = list(target_dir.rglob("robust_log_*.csv")) if target_dir.exists() else []
 
     if not candidates:
@@ -155,7 +155,7 @@ def find_latest_log() -> Path:
 
 
 def prepare_output_dir(log_path: Path, machine_name: str = UNKNOWN_MACHINE) -> Path:
-    log_root = REPO_ROOT / "anlz" / "outputs" / machine_name / log_path.stem
+    log_root = REPO_ROOT / "analysis" / "outputs" / machine_name / log_path.stem
     log_root.mkdir(parents=True, exist_ok=True)
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")

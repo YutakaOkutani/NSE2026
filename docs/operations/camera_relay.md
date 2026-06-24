@@ -3,7 +3,7 @@
 ## 概要
 
 - SBC side (`relay_sbc.py`):
-  - Calls `csmn/phs/p4.py`, `p5.py`, `p6.py` handlers directly for phase behavior.
+  - Calls `mission/phases/p4.py`, `p5.py`, `p6.py` handlers directly for phase behavior.
   - Uses shared managers (`sns_mgr.py`, `mtr_mgr.py`, `led_mgr.py`) instead of duplicating phase logic.
   - Keeps only SBC-specific realtime debug relay (overlay + telemetry transport).
   - Adds camera debug overlay (bbox, centroid, phase, GOAL sign).

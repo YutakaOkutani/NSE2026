@@ -9,7 +9,7 @@ if not MAIN_PY_LIBRARY_DIR.exists():
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import (
+from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     PARACHUTE_DIRECTION,
@@ -17,7 +17,7 @@ from csmn.const import (
     Phase,
     TIMEOUT_PHASE_1,
 )
-from csmn.phs.base import BasePhaseHandler
+from mission.phases.base import BasePhaseHandler
 
 
 class Phase1Handler(BasePhaseHandler):
@@ -44,7 +44,7 @@ class Phase1Handler(BasePhaseHandler):
 
 
 def run_standalone():
-    from csmn.run import run_single_phase
+    from mission.run import run_single_phase
 
     run_single_phase(Phase.PHASE1)
 

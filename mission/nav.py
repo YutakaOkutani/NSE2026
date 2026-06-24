@@ -1,7 +1,7 @@
 import math
 import time
 
-from csmn.const import DEGREE_FULL_CIRCLE, EARTH_RADIUS_METERS, MILLISECOND_SCALE
+from mission.const import DEGREE_FULL_CIRCLE, EARTH_RADIUS_METERS, MILLISECOND_SCALE
 
 
 def current_milli_time():

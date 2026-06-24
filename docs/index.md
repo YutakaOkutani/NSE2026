@@ -12,11 +12,11 @@
 ## 開発・デバッグ
 
 - [ミッション本体](development/mission.md)
-  - `csmn/`、`mgr/`、`phs/` の設計・デバッグ指針
+  - `mission/`、`mgr/`、`phases/` の設計・デバッグ指針
 - [試験コード](development/testing.md)
   - `runs/`、`diag/`、`spec/`、`orch/`、`cam/` の役割
 - [解析・低レイヤコンポーネント](development/components.md)
-  - `anlz/` と `lib/` の設計指針
+  - `analysis/` と `lib/` の設計指針
 
 ## 運用手順
 

@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import (
+from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     GPS_INACTIVE_DETECT,
@@ -19,15 +19,15 @@ from csmn.const import (
     PIN_LED_RED,
     Phase,
 )
-from csmn.mgr.led_mgr import LedManager
-from csmn.phs.p0 import Phase0Handler
-from csmn.phs.p1 import Phase1Handler
-from csmn.phs.p2 import Phase2Handler
-from csmn.phs.p3 import Phase3Handler
-from csmn.phs.p4 import Phase4Handler
-from csmn.phs.p5 import Phase5Handler
-from csmn.phs.p6 import Phase6Handler
-from csmn.phs.p7 import Phase7Handler
+from mission.mgr.led_mgr import LedManager
+from mission.phases.p0 import Phase0Handler
+from mission.phases.p1 import Phase1Handler
+from mission.phases.p2 import Phase2Handler
+from mission.phases.p3 import Phase3Handler
+from mission.phases.p4 import Phase4Handler
+from mission.phases.p5 import Phase5Handler
+from mission.phases.p6 import Phase6Handler
+from mission.phases.p7 import Phase7Handler
 
 
 class DummyState:
@@ -171,7 +171,7 @@ def run_demo():
     HARNESS = LedPatternHarness()
     signal.signal(signal.SIGINT, safe_exit)
 
-    print("--- LED test using production csmn handlers/managers ---")
+    print("--- LED test using production mission handlers/managers ---")
     print("Covers startup signal, Phase0-7 patterns, and give-up indication.")
     print("Note: LED_INTERVAL_PHASE3_NEAR exists in constants but is not used by current production phase handlers.\n")
 

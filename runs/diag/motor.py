@@ -4,12 +4,12 @@ import time
 from pathlib import Path
 
 # Allow running this file directly (e.g. `python runs/motor_diag.py`) by adding
-# the repository root to sys.path so `csmn` can be imported.
+# the repository root to sys.path so `mission` can be imported.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from csmn.const import (
+from mission.const import (
     MANUAL_TURN_SPEED_RATIO,
     MOTOR_DIR_INVERT_1,
     MOTOR_DIR_INVERT_2,
@@ -23,7 +23,7 @@ from csmn.const import (
     PIN_PH2,
     PWM_FREQ,
 )
-from csmn.profile import activate_machine_profile, list_profiles
+from mission.profile import activate_machine_profile, list_profiles
 
 DEFAULT_SPEED = 100  # Default duty for manual control (0-100)
 SPEED_STEP = 5  # Duty adjustment step for interactive test (0-100)

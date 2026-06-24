@@ -7,8 +7,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from csmn.const import PHASE0_DROP_TO_PHASE1_DELAY_SEC, PHASE0_IMPACT_CONFIRM_SAMPLES, Phase
-from csmn.phs.p0 import Phase0Handler
+from mission.const import PHASE0_DROP_TO_PHASE1_DELAY_SEC, PHASE0_IMPACT_CONFIRM_SAMPLES, Phase
+from mission.phases.p0 import Phase0Handler
 
 
 class _FakeLed:
