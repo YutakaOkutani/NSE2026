@@ -146,7 +146,7 @@ pip install --upgrade pip
 # GPS解析用ライブラリ
 pip install pynmea2
 
-# その他、main.py等で必要なライブラリがあればここで追加
+# その他、必要なライブラリがあればここで追加
 # pip install smbus2
 ```
 
