@@ -1,0 +1,31 @@
+title: "CanSat 制御アルゴリズム 1b: パラシュート分離・キャリブレーション"
+direction: down
+
+classes: {
+  phase: { style.fill: "#E8F2FF"; style.stroke: "#2459A6"; style.border-radius: 4 }
+  decision: { shape: diamond; style.fill: "#FFF7D6"; style.stroke: "#8A6D00" }
+  action: { style.fill: "#F8F8F8"; style.stroke: "#555555"; style.border-radius: 2 }
+  terminal: { shape: oval; style.fill: "#EAF8EA"; style.stroke: "#2F7D32" }
+  note: { style.fill: "#EEF1F8"; style.stroke: "#666666"; style.border-radius: 2 }
+}
+
+start: "Phase1開始\n放出判定後" { class: terminal }
+p1: "Phase1\nパラシュート分離\n左右モータ 100 %\n0.05 sパルス\nソフトスタート 1.2 s" { class: phase }
+p1_done: "30 s経過 ?" { class: decision }
+p2_straight: "Phase2\n磁気キャリブレーション\n直進 6.0 s\n左右 100 %\nランプ 0.2 s" { class: phase }
+p2_ok: "磁気キャリブレーション値\n>= 2 ?" { class: decision }
+p2_fig8: "8の字走行\n3.0 sごとに左右切替\n基準 100 %\n旋回バイアス 40 %" { class: action }
+p2_end: "8の字 15.0 s完了\nまたは Phase2 10 s超過 ?" { class: decision }
+to_gps: "Phase3へ\nGPS航行開始" { class: terminal }
+obstacle: "障害物回避割込み\nPhase2-4のみ有効\n0 < 距離 < 30.0 cm を\n3サンプル連続で検知\n停止0.2 s -> 右旋回0.5 s -> 停止0.2 s\n外輪60 %, 内輪21 %" { class: note }
+
+start -> p1 -> p1_done
+p1_done -> p1: "No"
+p1_done -> p2_straight: "Yes"
+p2_straight -> p2_ok
+p2_ok -> to_gps: "Yes"
+p2_ok -> p2_fig8: "No"
+p2_fig8 -> p2_end
+p2_end -> to_gps: "Yes"
+p2_end -> p2_fig8: "No"
+obstacle -> p2_straight: "割込み後復帰"

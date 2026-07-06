@@ -29,3 +29,7 @@ __pycache__/
 
 # Agents
 /.agents
+
+# generated from D2
+*.svg
+*.pdf

@@ -17,6 +17,8 @@
   - `runs/`、`diag/`、`spec/`、`orch/`、`cam/` の役割
 - [解析・低レイヤコンポーネント](development/components.md)
   - `analysis/` と `lib/` の設計指針
+- [フローチャート](flowchart/README.md)
+  - D2 記法による制御アルゴリズム図の管理、セットアップ、生成手順
 
 ## 運用手順
 

@@ -1,0 +1,39 @@
+title: "CanSat 制御アルゴリズム 2/3: GPS航行"
+direction: down
+
+classes: {
+  phase: { style.fill: "#E8F2FF"; style.stroke: "#2459A6"; style.border-radius: 4 }
+  decision: { shape: diamond; style.fill: "#FFF7D6"; style.stroke: "#8A6D00" }
+  action: { style.fill: "#F8F8F8"; style.stroke: "#555555"; style.border-radius: 2 }
+  terminal: { shape: oval; style.fill: "#EAF8EA"; style.stroke: "#2F7D32" }
+}
+
+start: "Phase3開始\nGPS航行" { class: terminal }
+gps_valid: "GPS有効 ?\nfix >= 1\n衛星数 >= 4\nHDOP <= 5.0\n安定fix >= 3\n速度 <= 10.0 m/s" { class: decision }
+calc: "現在位置から\nゴール距離・方位角を計算" { class: action }
+close: "ゴール距離\n< 3.0 m ?" { class: decision }
+heading: "方位取得 ?\n1. GPS進行方位\n2. GPS補正BNO\n3. GPS補正磁気" { class: decision }
+error: "方位誤差を計算\n-180 deg から 180 degへ正規化" { class: action }
+deadband: "誤差は閾値以内 ?\nGPS主導 <= 12.0 deg\nBNO/磁気 <= 5.0 deg" { class: decision }
+forward: "直進\n左右 100 %\nランプ 0.2 s" { class: action }
+turn: "前進差動旋回\nGPS主導:\n外輪 83.125 %, 内輪 71.875 %\nBNO/磁気:\n外輪 62.5 %, 内輪 37.5 %\nランプ 0.1 s" { class: action }
+no_heading: "方位なし\n左右 100 %で直進継続" { class: action }
+timeout: "Phase3累積予算超過 ?" { class: decision }
+to_camera: "Phase4へ\n画像探索開始" { class: terminal }
+
+start -> gps_valid
+gps_valid -> calc: "Yes"
+gps_valid -> no_heading: "No"
+calc -> close
+close -> to_camera: "Yes"
+close -> heading: "No"
+heading -> error: "Yes"
+heading -> no_heading: "No"
+error -> deadband
+deadband -> forward: "Yes"
+deadband -> turn: "No"
+forward -> gps_valid
+turn -> gps_valid
+no_heading -> timeout
+timeout -> to_camera: "Yes"
+timeout -> gps_valid: "No"
