@@ -16,8 +16,9 @@
 | `python3 main.py --machine unit2` | ミッションCSV + 到達時PNG | `log/unit2/<run_id>/` |
 | `runs/orch/*.py` | ミッションCSV + 到達時PNG | `runs/log/by_machine/<machine>/<label>/<run_id>/` |
 | `runs/orch/*.py --debug-scope shared` | ミッションCSV + 到達時PNG | `runs/log/shared/<label>/<machine>/<run_id>/` |
-| `runs/cam/detect_dbg.py` | `debug.csv` + 各種PNG + 到達時PNG | `runs/log/camera_debug_<timestamp>_<ms>/` |
-| `runs/cam/capture.py` | 撮影JPEG群 | `runs/log/capture_<timestamp>[_session]/` |
+| `lib/roi_capture.py` | ROI参照PNG + 最新ROI | `/home/pi/logs_nse2026/roi/` |
+| `runs/cam/detect_dbg.py` | `debug.csv` + 各種PNG + 到達時PNG | `/home/pi/logs_nse2026/camera_debug_<timestamp>_<ms>/` |
+| `runs/cam/capture.py` | 撮影JPEG群 | `/home/pi/logs_nse2026/capture_<timestamp>[_session]/` |
 | `runs/diag/gps.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/sensor.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/motor.py` | 端末出力のみ | 保存ファイルなし |

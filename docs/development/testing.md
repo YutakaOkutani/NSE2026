@@ -97,8 +97,9 @@
 
 ### スクリプトの位置づけ
 
-- `capture.py`: 現場サンプルの収集
-- `detect_dbg.py`: 本番 detector の観測・比較
+- `lib/roi_capture.py`: 本番 detector が読む ROI 参照画像の撮影
+- `runs/cam/capture.py`: 現場サンプルの収集
+- `runs/cam/detect_dbg.py`: 本番 detector の観測・比較
 - `relay_*`: 検出結果と遠隔観測の補助
 
 ### 指針

@@ -226,7 +226,13 @@ python3 runs/diag/motor.py
 python3 runs/diag/led.py
 
 # 画像・カメラ系
+# ROI参照画像（本番detectorが読む画像）を撮影
+python3 lib/roi_capture.py --count 3 --interval 0.5
+
+# 現場サンプル収集（学習・比較・記録用。本番ROIには自動反映されない）
 python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample
+
+# 本番detectorのライブデバッグ
 python3 runs/cam/detect_dbg.py --phase 4
 
 # ログ解析（PC上で実行）
@@ -237,23 +243,7 @@ python3 analysis/log.py
 
 ## 6. カメラの設定
 
-### カメラの初期設定
-
-```bash
-# 設定ファイルを編集（OV5647を明示する場合）
-sudo nano /boot/firmware/config.txt
-
-# 以下を追加または修正（行がある場合は値を合わせる）
-camera_auto_detect=0
-dtoverlay=ov5647
-```
-
-```bash
-# 編集後、再起動
-sudo reboot
-```
-
-### カメラ認識の確認
+### まずカメラ認識を確認
 
 ```bash
 # 認識デバイスの一覧
@@ -264,6 +254,28 @@ sudo dmesg | grep -Ei "ov5647|camera|unicam" | tail -n 30
 
 # 初期化時間の確認
 time rpicam-hello -t 1
+```
+
+カメラが認識されている場合、通常は `/boot/firmware/config.txt` を変更しない。
+
+### OV5647 が自動認識されない場合のみ
+
+Raspberry Pi Camera Module V1 系など、OV5647 センサーのカメラが自動認識されない場合だけ、手動指定を検討する。
+OV5647 以外のカメラでは、この設定を入れない。
+
+```bash
+# 設定ファイルを編集
+sudo nano /boot/firmware/config.txt
+
+# OV5647を手動指定する場合のみ、以下を追加または修正
+camera_auto_detect=0
+dtoverlay=ov5647
+```
+
+編集後、再起動する。
+
+```bash
+sudo reboot
 ```
 
 ### カメラコマンドの確認
