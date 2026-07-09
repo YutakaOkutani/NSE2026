@@ -20,7 +20,7 @@ LOG_PREFIX = "robust_log_"
 LOG_FILE_DATETIME_FORMAT = "%Y-%m%d-%H%M%S"
 
 # ターゲット座標
-TARGET_LAT = 38.206767
+TARGET_LAT = 38.260767
 TARGET_LNG = 140.854047
 
 # タイムアウトと動作関連定数
