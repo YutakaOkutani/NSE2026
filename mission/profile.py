@@ -53,7 +53,8 @@ PROFILE_REGISTRY: dict[str, MachineProfile] = {
             "LOG_DIR": str(_DEFAULT_LOG_ROOT / "unit2"),
             "MOTOR_DIR_INVERT_1": False,
             "MOTOR_DIR_INVERT_2": True,
-            "MOTOR_SPEED_SCALE_1": 1.00,
+            # MTR1(left) is faster than MTR2 on unit2 and drifts toward MTR2.
+            "MOTOR_SPEED_SCALE_1": 0.85,
             "MOTOR_SPEED_SCALE_2": 1.00,
             "MOTOR_SPEED_OFFSET_1": 0.0,
             "MOTOR_SPEED_OFFSET_2": 0.0,
