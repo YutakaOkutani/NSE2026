@@ -10,9 +10,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mission.const import (
-    MANUAL_TURN_SPEED_RATIO,
-    MOTOR_DIR_INVERT_1,
-    MOTOR_DIR_INVERT_2,
     MOTOR_SPEED_OFFSET_1,
     MOTOR_SPEED_OFFSET_2,
     MOTOR_SPEED_SCALE_1,
@@ -23,6 +20,7 @@ from mission.const import (
     PIN_PH2,
     PWM_FREQ,
 )
+from mission.motor_map import get_manual_drive_pattern, motor_forward_to_dir_value
 from mission.profile import activate_machine_profile, list_profiles
 
 DEFAULT_SPEED = 100  # Default duty for manual control (0-100)
@@ -39,37 +37,6 @@ motor_state = {
     'A': {'speed': 0.0, 'direction': 1},
     'B': {'speed': 0.0, 'direction': 1},
 }
-
-MANUAL_DRIVE_PATTERNS = {
-    "w": ("Forward", True, True),
-    "s": ("Backward", False, False),
-    "a": ("Left", True, True),
-    "d": ("Right", True, True),
-}
-
-
-def get_manual_drive_pattern(cmd, speed):
-    pattern = MANUAL_DRIVE_PATTERNS.get((cmd or "").lower())
-    if pattern is None:
-        return None
-    label, forward_a, forward_b = pattern
-    speed_fast = float(speed)
-    speed_slow = speed_fast * MANUAL_TURN_SPEED_RATIO
-    speed_a = speed_fast
-    speed_b = speed_fast
-    cmd_key = (cmd or "").lower()
-    if cmd_key == "a":
-        speed_a = speed_slow
-    elif cmd_key == "d":
-        speed_b = speed_slow
-    return {
-        "label": label,
-        "speed_a": speed_a,
-        "forward_a": bool(forward_a),
-        "speed_b": speed_b,
-        "forward_b": bool(forward_b),
-    }
-
 
 def setup():
     """Initialize gpiozero devices."""
@@ -178,8 +145,8 @@ def set_motor(motor_side, speed, direction, ramp_time=0.6, step_interval=0.05):
 
     # Set direction (PH Pin)
     # Match production polarity handling through invert flags.
-    invert = MOTOR_DIR_INVERT_1 if motor_side == 'A' else MOTOR_DIR_INVERT_2
-    dir_dev.value = 1 if (bool(direction) ^ bool(invert)) else 0
+    motor_index = 1 if motor_side == 'A' else 2
+    dir_dev.value = motor_forward_to_dir_value(motor_index, direction)
 
     # Set PWM duty with ramp (EN Pin - PWM 0.0-1.0)
     target_speed = _apply_speed_scale(speed, motor_side)
@@ -215,8 +182,8 @@ def set_motors(speed_a, dir_a, speed_b, dir_b, ramp_time=0.6, step_interval=0.05
         )
 
     # Match production polarity handling through invert flags.
-    motor_1_dir.value = 1 if (bool(dir_a) ^ bool(MOTOR_DIR_INVERT_1)) else 0
-    motor_2_dir.value = 1 if (bool(dir_b) ^ bool(MOTOR_DIR_INVERT_2)) else 0
+    motor_1_dir.value = motor_forward_to_dir_value(1, dir_a)
+    motor_2_dir.value = motor_forward_to_dir_value(2, dir_b)
 
     target_a = _apply_speed_scale(speed_a, 'A')
     target_b = _apply_speed_scale(speed_b, 'B')
@@ -273,18 +240,12 @@ def drive_backward(speed=DEFAULT_SPEED):
 
 def turn_left(speed=DEFAULT_SPEED):
     """Steer left with differential forward speeds (no reverse)."""
-    fast = max(0.0, min(100.0, float(speed)))
-    slow = max(0.0, min(100.0, fast * MANUAL_TURN_SPEED_RATIO))
-    # A: MTR1, B: MTR2
-    set_motors(slow, 1, fast, 1)
+    _apply_manual_drive_pattern("a", speed)
 
 
 def turn_right(speed=DEFAULT_SPEED):
     """Steer right with differential forward speeds (no reverse)."""
-    fast = max(0.0, min(100.0, float(speed)))
-    slow = max(0.0, min(100.0, fast * MANUAL_TURN_SPEED_RATIO))
-    # A: MTR1, B: MTR2
-    set_motors(fast, 1, slow, 1)
+    _apply_manual_drive_pattern("d", speed)
 
 
 def _read_key():

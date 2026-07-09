@@ -1,0 +1,58 @@
+from mission.const import (
+    MANUAL_TURN_SPEED_RATIO,
+    MOTOR_DIR_INVERT_1,
+    MOTOR_DIR_INVERT_2,
+)
+
+
+MANUAL_DRIVE_PATTERNS = {
+    "w": ("Forward", True, True),
+    "s": ("Backward", False, False),
+    "a": ("Left", True, True),
+    "d": ("Right", True, True),
+}
+
+
+def motor_forward_to_dir_value(motor_index, forward):
+    """Convert a logical forward command into the motor driver's PH pin value."""
+    if int(motor_index) == 1:
+        invert = MOTOR_DIR_INVERT_1
+    elif int(motor_index) == 2:
+        invert = MOTOR_DIR_INVERT_2
+    else:
+        raise ValueError(f"Unknown motor index: {motor_index}")
+    return forward_to_dir_value(forward, invert)
+
+
+def forward_to_dir_value(forward, invert):
+    """Convert logical direction plus an invert flag into the PH pin value."""
+    return 1 if (bool(forward) ^ bool(invert)) else 0
+
+
+def get_manual_drive_pattern(cmd, speed):
+    """Return a normalized two-motor command for manual WASD control.
+
+    Motor ordering is fixed as:
+    - A: MTR1 (left)
+    - B: MTR2 (right)
+    """
+    pattern = MANUAL_DRIVE_PATTERNS.get((cmd or "").lower())
+    if pattern is None:
+        return None
+    label, forward_a, forward_b = pattern
+    speed_fast = float(speed)
+    speed_slow = speed_fast * MANUAL_TURN_SPEED_RATIO
+    speed_a = speed_fast
+    speed_b = speed_fast
+    cmd_key = (cmd or "").lower()
+    if cmd_key == "a":
+        speed_a = speed_slow
+    elif cmd_key == "d":
+        speed_b = speed_slow
+    return {
+        "label": label,
+        "speed_a": speed_a,
+        "forward_a": bool(forward_a),
+        "speed_b": speed_b,
+        "forward_b": bool(forward_b),
+    }

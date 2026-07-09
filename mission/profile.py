@@ -51,7 +51,7 @@ PROFILE_REGISTRY: dict[str, MachineProfile] = {
         description="2号機用プロファイル。1号機との差分だけをここに置く。",
         const_overrides={
             "LOG_DIR": str(_DEFAULT_LOG_ROOT / "unit2"),
-            "MOTOR_DIR_INVERT_1": True,
+            "MOTOR_DIR_INVERT_1": False,
             "MOTOR_DIR_INVERT_2": True,
             "MOTOR_SPEED_SCALE_1": 1.00,
             "MOTOR_SPEED_SCALE_2": 1.00,
@@ -66,6 +66,7 @@ PATCHABLE_MODULES = (
     "mission.const",
     "mission.ctrl",
     "mission.gps_util",
+    "mission.motor_map",
     "mission.mgr.hw_mgr",
     "mission.mgr.mtr_mgr",
     "mission.mgr.sns_mgr",

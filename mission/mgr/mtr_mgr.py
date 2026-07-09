@@ -12,9 +12,6 @@ from mission.const import (
     DEVICE_MOTOR_1_PWM,
     DEVICE_MOTOR_2_DIR,
     DEVICE_MOTOR_2_PWM,
-    MOTOR_DIR_INVERT_1,
-    MOTOR_DIR_INVERT_2,
-    MANUAL_TURN_SPEED_RATIO,
     MOTOR_IDLE_SLEEP,
     MOTOR_LOOP_INTERVAL,
     MOTOR_RAMP_STEP,
@@ -72,43 +69,7 @@ from mission.const import (
     TURN_GAIN_SCALE_MIN,
     Phase,
 )
-
-
-MANUAL_DRIVE_PATTERNS = {
-    "w": ("Forward", True, True),
-    "s": ("Backward", False, False),
-    "a": ("Left", True, True),
-    "d": ("Right", True, True),
-}
-
-
-def get_manual_drive_pattern(cmd, speed):
-    """Return a normalized two-motor command for manual WASD control.
-
-    Motor ordering is fixed as:
-    - A: MTR1 (left)
-    - B: MTR2 (right)
-    """
-    pattern = MANUAL_DRIVE_PATTERNS.get((cmd or "").lower())
-    if pattern is None:
-        return None
-    label, forward_a, forward_b = pattern
-    speed_fast = float(speed)
-    speed_slow = speed_fast * MANUAL_TURN_SPEED_RATIO
-    speed_a = speed_fast
-    speed_b = speed_fast
-    cmd_key = (cmd or "").lower()
-    if cmd_key == "a":
-        speed_a = speed_slow
-    elif cmd_key == "d":
-        speed_b = speed_slow
-    return {
-        "label": label,
-        "speed_a": speed_a,
-        "forward_a": bool(forward_a),
-        "speed_b": speed_b,
-        "forward_b": bool(forward_b),
-    }
+from mission.motor_map import forward_to_dir_value, get_manual_drive_pattern, motor_forward_to_dir_value
 
 
 class MotorManager:
@@ -636,7 +597,7 @@ class MotorManager:
                 step_interval,
             )
 
-        motor_dir.value = 1 if (forward ^ invert) else 0
+        motor_dir.value = forward_to_dir_value(forward, invert)
         target_speed = self._clamp_percent(speed)
         devices = getattr(self, "devices", {})
         if motor_pwm is devices.get(DEVICE_MOTOR_1_PWM):
@@ -687,8 +648,8 @@ class MotorManager:
                 step_interval,
             )
 
-        motor_1_dir.value = 1 if (forward_a ^ MOTOR_DIR_INVERT_1) else 0
-        motor_2_dir.value = 1 if (forward_b ^ MOTOR_DIR_INVERT_2) else 0
+        motor_1_dir.value = motor_forward_to_dir_value(1, forward_a)
+        motor_2_dir.value = motor_forward_to_dir_value(2, forward_b)
 
         target_a = self._apply_motor_speed_scale(speed_a, 1)
         target_b = self._apply_motor_speed_scale(speed_b, 2)
