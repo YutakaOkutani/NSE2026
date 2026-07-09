@@ -49,6 +49,11 @@ class Phase3Handler(BasePhaseHandler):
             heading_diff = None
             if nav_heading is not None:
                 heading_diff = controller._angle_diff_deg(azimuth, nav_heading)
+            controller.st.update_navigation(
+                nav_heading=nav_heading if nav_heading is not None else 0.0,
+                nav_heading_source=nav_heading_source,
+                heading_diff=heading_diff if heading_diff is not None else 0.0,
+            )
             if controller.led_blink_timer % PHASE_LOG_INTERVAL == 0:
                 if nav_heading is not None and heading_diff is not None:
                     print(

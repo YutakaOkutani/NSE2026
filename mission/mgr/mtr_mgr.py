@@ -52,8 +52,12 @@ from mission.const import (
     PHASE3_GPS_FALLBACK_DEADBAND_DEG,
     PHASE3_GPS_FALLBACK_TURN_SCALE,
     PHASE3_HEADING_DEADBAND_DEG,
+    PHASE3_LARGE_ERROR_DEG,
+    PHASE3_LARGE_ERROR_INNER_SPEED,
+    PHASE3_LARGE_ERROR_OUTER_SPEED,
     PHASE3_MAG_STUCK_MIN_DELTA_DEG,
     PHASE3_MAG_STUCK_TIMEOUT_SEC,
+    PHASE3_MOTOR_LOOP_INTERVAL,
     PHASE3_TURN_RAMP_TIME,
     PHASE3_TURN_INNER_SPEED,
     PHASE3_TURN_OUTER_SPEED,
@@ -151,8 +155,9 @@ class MotorManager:
 
     def _phase3_heading(self, snapshot):
         # Phase3 policy:
-        # - Use GPS-derived course first when available.
-        # - Use IMU only after GPS has provided an offset/alignment anchor.
+        # - Use GPS-derived course to learn an IMU alignment anchor.
+        # - Once anchored, use BNO for high-rate steering; GPS course is too sparse
+        #   and noisy at sub-meter deltas to drive the motors directly.
         # Raw mag-only steering was the main source of large snakes and in-place spins.
         gps_heading = None
         if snapshot.get("gps_heading_valid", False):
@@ -174,6 +179,13 @@ class MotorManager:
             if snapshot.get("angle_valid", False) and math.isfinite(angle) and hasattr(self, "_update_bno_heading_offset_from_gps"):
                 self._update_bno_heading_offset_from_gps(snapshot)
 
+        if snapshot.get("angle_valid", False) and math.isfinite(angle):
+            if getattr(self, "bno_heading_offset_valid", False) and hasattr(self, "_bno_heading_aligned_to_gps"):
+                aligned = self._bno_heading_aligned_to_gps(snapshot)
+                if aligned is not None:
+                    return aligned, "BNO_ALIGNED"
+
+        if gps_heading is not None:
             return gps_heading, "GPS_PRIMARY"
 
         if snapshot.get("angle_valid", False) and math.isfinite(angle):
@@ -383,7 +395,16 @@ class MotorManager:
                             cmd_type="phase3_gps_forward",
                         )
                     else:
-                        if diff > 0:
+                        turn_side = "right" if diff > 0 else "left"
+                        if abs(diff) >= PHASE3_LARGE_ERROR_DEG:
+                            self._set_forward_pivot_turn(
+                                turn_side,
+                                PHASE3_LARGE_ERROR_OUTER_SPEED,
+                                cmd_type="phase3_gps_turn",
+                                speed_inner=PHASE3_LARGE_ERROR_INNER_SPEED,
+                                ramp_time=PHASE3_TURN_RAMP_TIME,
+                            )
+                        elif diff > 0:
                             # Positive diff must keep the pre-fix polarity used in field runs.
                             # With our left/right motor mapping, left wheel faster steers right.
                             self._set_forward_diff_turn(
@@ -407,7 +428,7 @@ class MotorManager:
                         self.phase3_no_heading_start = time.time()
                     # Legacy Phase3 was straight-dominant; alternating left/right search here
                     # creates the large S-curves seen in recent logs.
-                    base = self._clamp_percent(BASE_SPEED)
+                    base = self._clamp_percent(PHASE3_FORWARD_SPEED)
                     self.set_motors(
                         base,
                         True,
@@ -501,6 +522,8 @@ class MotorManager:
 
             if phase in (Phase.PHASE4, Phase.PHASE5):
                 time.sleep(PHASE45_MOTOR_LOOP_INTERVAL)
+            elif phase == Phase.PHASE3:
+                time.sleep(PHASE3_MOTOR_LOOP_INTERVAL)
             else:
                 time.sleep(MOTOR_LOOP_INTERVAL)
         self.stop_motors()

@@ -23,6 +23,9 @@ class CanSatState:
         self.gps_fix_qual = 0
         self.gps_sats = 0
         self.gps_hdop = DEFAULT_FLOAT_VALUE
+        self.nav_heading = DEFAULT_FLOAT_VALUE
+        self.nav_heading_source = ""
+        self.heading_diff = DEFAULT_FLOAT_VALUE
         self.alt = DEFAULT_FLOAT_VALUE
         self.pres = DEFAULT_FLOAT_VALUE
         self.distance = DEFAULT_FLOAT_VALUE
@@ -93,7 +96,16 @@ class CanSatState:
             if pres is not None:
                 self.pres = pres
 
-    def update_navigation(self, distance=None, azimuth=None, direction=None, phase=None):
+    def update_navigation(
+        self,
+        distance=None,
+        azimuth=None,
+        direction=None,
+        phase=None,
+        nav_heading=None,
+        nav_heading_source=None,
+        heading_diff=None,
+    ):
         with self.lock:
             if distance is not None:
                 self.distance = distance
@@ -103,6 +115,12 @@ class CanSatState:
                 self.direction = direction
             if phase is not None:
                 self.phase = phase
+            if nav_heading is not None:
+                self.nav_heading = nav_heading
+            if nav_heading_source is not None:
+                self.nav_heading_source = nav_heading_source
+            if heading_diff is not None:
+                self.heading_diff = heading_diff
 
     def update_cone(self, cone_direction=None, cone_probability=None, cone_is_reached=None, cone_method=None):
         with self.lock:
@@ -134,6 +152,9 @@ class CanSatState:
                 "gps_fix_qual": self.gps_fix_qual,
                 "gps_sats": self.gps_sats,
                 "gps_hdop": self.gps_hdop,
+                "nav_heading": self.nav_heading,
+                "nav_heading_source": self.nav_heading_source,
+                "heading_diff": self.heading_diff,
                 "alt": self.alt,
                 "pres": self.pres,
                 "distance": self.distance,
