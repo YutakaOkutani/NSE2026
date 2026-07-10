@@ -154,22 +154,101 @@ pip install pynmea2
 
 ## 4. シリアル通信 / GPIO / I2C の有効化
 
+GPS は GPIO 14/15（物理ピン 8/10）の UART を使用する。Raspberry Pi Zero 2 W では、標準状態の `/dev/serial0` がクロック変動の影響を受ける mini UART（`ttyS0`）を指す場合がある。本機では Bluetooth を使用しないため、Bluetooth を無効化し、安定性の高い PL011 UART（`ttyAMA*`）を GPS 専用として割り当てる。
+
 ### 4.1 raspi-config での設定
 
 ```bash
 sudo raspi-config
 ```
 
-### 4.2 以下を有効化
+### 4.2 I2C と UART の設定
 
 * Interface Options → I2C
-* Interface Options → Serial
+* Interface Options → Serial Port
 
-完了後、再起動。
+Serial Port では、表示される2つの質問に次のように回答する。
+
+```text
+Would you like a login shell to be accessible over serial?
+→ No
+
+Would you like the serial port hardware to be enabled?
+→ Yes
+```
+
+シリアルログインを有効にすると、Linux のコンソールと GPS が同じ UART を使用して競合するため、必ず `No` にする。
+
+### 4.3 シリアルコンソールが無効になっていることを確認
+
+```bash
+cat /proc/cmdline
+```
+
+出力に次のような指定が残っていないことを確認する。
+
+```text
+console=serial0,115200
+console=ttyS0,115200
+console=ttyAMA0,115200
+```
+
+残っている場合は、Bookworm 系 Raspberry Pi OS では `/boot/firmware/cmdline.txt`、旧OSでは `/boot/cmdline.txt` から該当する `console=...` だけを削除する。
+
+```bash
+sudo nano /boot/firmware/cmdline.txt
+```
+
+`cmdline.txt` は改行せず、必ず1行のまま保存する。
+
+### 4.4 Bluetooth を無効化して PL011 UART を GPS に割り当てる
+
+Bookworm 系 Raspberry Pi OS では次を編集する。
+
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+旧OSの場合は `/boot/config.txt` を編集する。ファイル末尾に次を追加する。
+
+```ini
+enable_uart=1
+dtoverlay=disable-bt
+```
+
+Bluetooth の UART 初期化サービスも無効化する。
+
+```bash
+sudo systemctl disable hciuart
+sudo systemctl mask hciuart
+```
+
+本機では Bluetooth を使用しないため、`dtoverlay=miniuart-bt` ではなく `dtoverlay=disable-bt` を使用する。これにより、PL011 UART が GPIO 14/15 側の primary UART になる。
+
+### 4.5 再起動
+
+設定完了後に再起動する。
 
 ```bash
 sudo reboot
 ```
+
+### 4.6 UART 割り当ての確認
+
+再起動後に次を実行する。
+
+```bash
+ls -l /dev/serial0
+readlink -f /dev/serial0
+```
+
+`/dev/serial0` の実体が `ttyS0` ではなく、`/dev/ttyAMA0` などの `ttyAMA*`（PL011 UART）になっていることを確認する。
+
+```text
+/dev/ttyAMA0
+```
+
+`/dev/serial0` が存在しない、または `ttyS0` を指したままの場合は、その状態で本番運用へ進まず、`enable_uart=1`、`dtoverlay=disable-bt`、編集した設定ファイルのパスを再確認する。
 
 ---
 
@@ -210,7 +289,6 @@ nano machine.txt
 
 * 作業ディレクトリは `~/NSE2026`
 * 必要なら先に仮想環境を有効化: `source venv/bin/activate`
-* 引数なしで機体を固定したい場合は、リポジトリ直下の `machine.txt` に `unit1` または `unit2` を1行で書く
 
 ```bash
 # E2E試験時実行
@@ -613,7 +691,7 @@ ssh pi@100.x.y.z
 ##### 0. 前提
 
 PC: Windows（Macならそもそもこの問題は起きないので設定不要）
-スマホ: Android（iPhoneの人も、スマホでターミナル操作をするなら、多分やったほうがいい。）
+スマホ: Android
 
 ##### 1. アカウント作成（PCで）
 
