@@ -21,6 +21,8 @@ class _HeadingOnlyController(MotorManager):
         self.mag_heading_offset_valid = False
         self.mag_heading_offset_deg = 0.0
         self.bno_stale_sec = 0.0
+        self.phase2_offset_reference_bno_deg = None
+        self.phase2_offset_heading_error_deg = 0.0
 
     def _normalize_heading_deg(self, value):
         try:
@@ -50,6 +52,28 @@ class _HeadingOnlyController(MotorManager):
 
 
 class Phase3HeadingTest(unittest.TestCase):
+    def test_phase2_offset_hold_steers_back_to_relative_bno_heading(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase2_offset_reference_bno_deg = 100.0
+
+        speed_l, speed_r, error = ctrl._phase2_offset_hold_speeds(
+            {"angle_valid": True, "angle": 90.0}
+        )
+
+        self.assertGreater(speed_l, speed_r)
+        self.assertAlmostEqual(error, 10.0)
+
+    def test_phase2_offset_hold_handles_heading_wraparound(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase2_offset_reference_bno_deg = 2.0
+
+        speed_l, speed_r, error = ctrl._phase2_offset_hold_speeds(
+            {"angle_valid": True, "angle": 358.0}
+        )
+
+        self.assertGreater(speed_l, speed_r)
+        self.assertAlmostEqual(error, 4.0)
+
     def test_uses_bno_after_gps_alignment_is_valid(self):
         ctrl = _HeadingOnlyController()
         ctrl.bno_heading_offset_valid = True

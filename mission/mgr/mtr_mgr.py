@@ -44,6 +44,9 @@ from mission.const import (
     PHASE5_STEER_DEADBAND,
     PHASE5_TURN_CLAMP,
     PHASE2_SPEED,
+    PHASE2_OFFSET_HOLD_DEADBAND_DEG,
+    PHASE2_OFFSET_HOLD_KP,
+    PHASE2_OFFSET_HOLD_MAX_DELTA,
     PHASE2_OFFSET_SPEED,
     PHASE2_STAGE_CALIBRATION,
     PHASE2_STAGE_ESCAPE,
@@ -96,6 +99,34 @@ class MotorManager:
             self.set_motors(speed_fast, True, speed_slow, True, ramp_time=ramp_time, cmd_type=cmd_type)
         else:
             self.set_motors(speed_slow, True, speed_fast, True, ramp_time=ramp_time, cmd_type=cmd_type)
+
+    def _phase2_offset_hold_speeds(self, snapshot):
+        reference = getattr(self, "phase2_offset_reference_bno_deg", None)
+        if reference is None or not snapshot.get("angle_valid", False):
+            return None
+        try:
+            reference = float(reference) % 360.0
+            angle = float(snapshot.get("angle")) % 360.0
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(reference) or not math.isfinite(angle):
+            return None
+
+        error = self._angle_diff_deg(reference, angle)
+        self.phase2_offset_heading_error_deg = error
+        base = self._clamp_percent(PHASE2_OFFSET_SPEED)
+        if abs(error) <= float(PHASE2_OFFSET_HOLD_DEADBAND_DEG):
+            return base, base, error
+
+        delta = min(
+            float(PHASE2_OFFSET_HOLD_MAX_DELTA),
+            abs(error) * float(PHASE2_OFFSET_HOLD_KP),
+        )
+        fast = self._clamp_percent(base + delta)
+        slow = self._clamp_percent(base - delta)
+        if error > 0.0:
+            return fast, slow, error
+        return slow, fast, error
 
     def _set_forward_pivot_turn(
         self,
@@ -370,14 +401,24 @@ class MotorManager:
                         cmd_type="phase2_escape_forward",
                     )
                 elif self.phase2_stage == PHASE2_STAGE_OFFSET:
-                    self.set_motors(
-                        PHASE2_OFFSET_SPEED,
-                        True,
-                        PHASE2_OFFSET_SPEED,
-                        True,
-                        ramp_time=PHASE2_RAMP_TIME,
-                        cmd_type="phase2_offset_forward",
-                    )
+                    hold = self._phase2_offset_hold_speeds(snapshot)
+                    if hold is None:
+                        self.stop_motors()
+                    else:
+                        speed_l, speed_r, heading_error = hold
+                        cmd_type = (
+                            "phase2_offset_heading_hold_straight"
+                            if abs(heading_error) <= float(PHASE2_OFFSET_HOLD_DEADBAND_DEG)
+                            else "phase2_offset_heading_hold"
+                        )
+                        self.set_motors(
+                            speed_l,
+                            True,
+                            speed_r,
+                            True,
+                            ramp_time=PHASE2_RAMP_TIME,
+                            cmd_type=cmd_type,
+                        )
                 elif self.phase2_stage == PHASE2_STAGE_CALIBRATION:
                     elapsed = 0.0
                     if self.phase2_stage_start is not None:

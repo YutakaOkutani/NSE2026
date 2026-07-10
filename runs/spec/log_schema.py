@@ -103,6 +103,16 @@ class LogSchemaTest(unittest.TestCase):
         ctrl.bno_calib = {"valid": True, "value": (3, 2, 1, 2)}
         ctrl.bno_heading_offset_candidate_deg = 11.8
         ctrl.bno_heading_offset_candidate_count = 4
+        ctrl.phase2_offset_reference_bno_deg = 118.0
+        ctrl.phase2_offset_heading_error_deg = -2.5
+        ctrl.phase2_offset_distance_m = 5.4
+        ctrl.phase2_offset_path_efficiency = 0.91
+        ctrl.phase2_offset_course_deg = 123.0
+        ctrl.phase2_offset_bno_mean_deg = 111.0
+        ctrl.phase2_offset_bno_spread_deg = 3.5
+        ctrl.phase2_offset_subsegment_diff_deg = 4.0
+        ctrl.phase2_offset_attempt_count = 1
+        ctrl.phase2_offset_reject_reason = ""
         ctrl.st.update_navigation(
             nav_heading=120.0,
             nav_heading_source="BNO_ALIGNED",
@@ -137,6 +147,16 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["BNOCalibGyro"], 2)
         self.assertEqual(by_name["BNOCalibAcc"], 1)
         self.assertEqual(by_name["BNOCalibMag"], 2)
+        self.assertEqual(by_name["Phase2OffsetRefDeg"], "118.00")
+        self.assertEqual(by_name["Phase2OffsetHeadingErrorDeg"], "-2.50")
+        self.assertEqual(by_name["Phase2OffsetDistanceM"], "5.40")
+        self.assertEqual(by_name["Phase2OffsetPathEfficiency"], "0.910")
+        self.assertEqual(by_name["Phase2OffsetCourseDeg"], "123.00")
+        self.assertEqual(by_name["Phase2OffsetBNOMeanDeg"], "111.00")
+        self.assertEqual(by_name["Phase2OffsetBNOSpreadDeg"], "3.50")
+        self.assertEqual(by_name["Phase2OffsetSubsegmentDiffDeg"], "4.00")
+        self.assertEqual(by_name["Phase2OffsetAttemptCount"], 1)
+        self.assertEqual(by_name["Phase2OffsetRejectReason"], "")
         self.assertEqual(by_name["ArrivalInside"], 1)
         self.assertEqual(by_name["ArrivalConfirmCount"], 3)
         self.assertEqual(by_name["Phase3ArrivedLatched"], 1)
