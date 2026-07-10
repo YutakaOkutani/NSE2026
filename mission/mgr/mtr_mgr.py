@@ -33,6 +33,7 @@ from mission.const import (
     PHASE1_SOFTSTART_STEP,
     PHASE4_SEARCH_SWEEP_INTERVAL,
     PHASE4_ALIGN_FORWARD_SPEED,
+    PHASE4_ALIGN_INNER_SPEED,
     PHASE4_ALIGN_PIVOT_SPEED,
     PHASE4_ALIGN_STOP_DEADBAND,
     PHASE4_MOTOR_RAMP_TIME,
@@ -69,6 +70,7 @@ from mission.const import (
     PWM_PERCENT_MIN,
     RAMP_HALF_DIVISOR,
     SEARCH_ROTATION_SPEED,
+    SEARCH_ROTATION_INNER_SPEED,
     TURN_GAIN_SCALE_MAX,
     TURN_GAIN_SCALE_MIN,
     Phase,
@@ -397,11 +399,12 @@ class MotorManager:
                     else:
                         turn_side = "right" if diff > 0 else "left"
                         if abs(diff) >= PHASE3_LARGE_ERROR_DEG:
-                            self._set_forward_pivot_turn(
-                                turn_side,
+                            fast_side = "left" if diff > 0 else "right"
+                            self._set_forward_diff_turn(
+                                fast_side,
                                 PHASE3_LARGE_ERROR_OUTER_SPEED,
+                                PHASE3_LARGE_ERROR_INNER_SPEED,
                                 cmd_type="phase3_gps_turn",
-                                speed_inner=PHASE3_LARGE_ERROR_INNER_SPEED,
                                 ramp_time=PHASE3_TURN_RAMP_TIME,
                             )
                         elif diff > 0:
@@ -464,7 +467,7 @@ class MotorManager:
                         turn_side,
                         PHASE4_ALIGN_PIVOT_SPEED,
                         cmd_type="phase4_camera_pivot_align",
-                        speed_inner=0.0,
+                        speed_inner=PHASE4_ALIGN_INNER_SPEED,
                         ramp_time=PHASE4_MOTOR_RAMP_TIME,
                     )
                 else:
@@ -475,6 +478,7 @@ class MotorManager:
                         "left",
                         SEARCH_ROTATION_SPEED,
                         cmd_type="phase4_search_pivot",
+                        speed_inner=SEARCH_ROTATION_INNER_SPEED,
                         ramp_time=PHASE4_MOTOR_RAMP_TIME,
                     )
             elif phase == Phase.PHASE5:

@@ -57,7 +57,7 @@ COLUMN_GROUPS = [
     {
         "key": "gps_position",
         "title": "GPS - Position & Quality",
-        "cols": ["LAT", "LNG", "GpsSpeedMps", "GPSFixQual", "GPSSats", "GPSHdop"],
+        "cols": ["LAT", "LNG", "GpsSpeedMps", "GPSFixQual", "GPSSats", "GPSHdop", "GpsHeading", "GpsHeadingValid"],
     },
     {
         "key": "altitude_pressure",
@@ -67,7 +67,17 @@ COLUMN_GROUPS = [
     {
         "key": "navigation",
         "title": "Navigation",
-        "cols": ["Distance", "Azimuth", "TargetLat", "TargetLng", "Angle", "Direction", "AngleValid"],
+        "cols": [
+            "Distance",
+            "Azimuth",
+            "TargetLat",
+            "TargetLng",
+            "Angle",
+            "Direction",
+            "AngleValid",
+            "NavHeading",
+            "HeadingDiff",
+        ],
     },
     {
         "key": "vision_detection",
