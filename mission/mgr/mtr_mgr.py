@@ -44,7 +44,10 @@ from mission.const import (
     PHASE5_STEER_DEADBAND,
     PHASE5_TURN_CLAMP,
     PHASE2_SPEED,
-    PHASE2_STAGE_STRAIGHT,
+    PHASE2_OFFSET_SPEED,
+    PHASE2_STAGE_CALIBRATION,
+    PHASE2_STAGE_ESCAPE,
+    PHASE2_STAGE_OFFSET,
     PHASE2_TURN_BIAS,
     PHASE2_TURN_INTERVAL,
     PHASE2_RAMP_TIME,
@@ -357,16 +360,25 @@ class MotorManager:
                 continue
 
             if phase == Phase.PHASE2:
-                if self.phase2_stage == PHASE2_STAGE_STRAIGHT:
+                if self.phase2_stage == PHASE2_STAGE_ESCAPE:
                     self.set_motors(
                         PHASE2_SPEED,
                         True,
                         PHASE2_SPEED,
                         True,
                         ramp_time=PHASE2_RAMP_TIME,
-                        cmd_type="phase2_straight",
+                        cmd_type="phase2_escape_forward",
                     )
-                else:
+                elif self.phase2_stage == PHASE2_STAGE_OFFSET:
+                    self.set_motors(
+                        PHASE2_OFFSET_SPEED,
+                        True,
+                        PHASE2_OFFSET_SPEED,
+                        True,
+                        ramp_time=PHASE2_RAMP_TIME,
+                        cmd_type="phase2_offset_forward",
+                    )
+                elif self.phase2_stage == PHASE2_STAGE_CALIBRATION:
                     elapsed = 0.0
                     if self.phase2_stage_start is not None:
                         elapsed = time.time() - self.phase2_stage_start
@@ -385,8 +397,10 @@ class MotorManager:
                         speed_r,
                         True,
                         ramp_time=PHASE2_RAMP_TIME,
-                        cmd_type="phase2_fig8",
+                        cmd_type="phase2_calibration_turn",
                     )
+                else:
+                    self.stop_motors()
                 time.sleep(MOTOR_LOOP_INTERVAL)
                 continue
 

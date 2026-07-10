@@ -152,6 +152,9 @@ class SensorManager:
         bmp_stale_sec = BNO_STALE_TIMEOUT + 1.0
         if bmp_last_valid_time > 0.0:
             bmp_stale_sec = max(0.0, now - bmp_last_valid_time)
+        calib_values = getattr(self, "bno_calib", {}).get("value", (0, 0, 0, 0))
+        if not isinstance(calib_values, (list, tuple)) or len(calib_values) < 4:
+            calib_values = (0, 0, 0, 0)
 
         return [
             str(getattr(self, "machine_name", "common")),
@@ -176,6 +179,7 @@ class SensorManager:
             f"{self._coerce_float(current_data.get('gps_hdop', 0.0)):.2f}",
             f"{self._coerce_float(current_data.get('gps_heading', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("gps_heading_valid", False))),
+            self._coerce_int(current_data.get("gps_fix_seq", 0)),
             f"{self._coerce_float(current_data.get('nav_heading', 0.0)):.2f}",
             str(current_data.get("nav_heading_source", "")),
             f"{self._coerce_float(current_data.get('heading_diff', 0.0)):.2f}",
@@ -183,7 +187,14 @@ class SensorManager:
             self._coerce_int(bool(current_data.get("bno_trusted", False))),
             f"{self._coerce_float(current_data.get('bno_offset_deg', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("bno_offset_valid", False))),
+            f"{self._coerce_float(getattr(self, 'bno_heading_offset_candidate_deg', 0.0)):.2f}",
+            self._coerce_int(getattr(self, "bno_heading_offset_candidate_count", 0)),
             f"{self._coerce_float(current_data.get('gps_heading_baseline_m', 0.0)):.2f}",
+            str(getattr(self, "phase2_stage", "")),
+            self._coerce_int(calib_values[0]),
+            self._coerce_int(calib_values[1]),
+            self._coerce_int(calib_values[2]),
+            self._coerce_int(calib_values[3]),
             self._coerce_int(bool(current_data.get("arrival_inside", False))),
             self._coerce_int(current_data.get("arrival_confirm_count", 0)),
             self._coerce_int(bool(current_data.get("phase3_arrived_latched", False))),
@@ -894,6 +905,7 @@ class SensorManager:
                         gps_fix_qual=gps_fix_qual_val,
                         gps_sats=gps_sats_val,
                         gps_hdop=gps_hdop_val,
+                        gps_fix_accepted=True,
                     )
                     diag["status"] = "ACTIVE"
                     last_valid_fix_time = now

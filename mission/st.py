@@ -23,6 +23,7 @@ class CanSatState:
         self.gps_fix_qual = 0
         self.gps_sats = 0
         self.gps_hdop = DEFAULT_FLOAT_VALUE
+        self.gps_fix_seq = 0
         self.nav_heading = DEFAULT_FLOAT_VALUE
         self.nav_heading_source = ""
         self.heading_diff = DEFAULT_FLOAT_VALUE
@@ -77,6 +78,7 @@ class CanSatState:
         gps_sats=None,
         gps_hdop=None,
         gps_heading_baseline_m=None,
+        gps_fix_accepted=False,
     ):
         with self.lock:
             if lat is not None:
@@ -99,6 +101,8 @@ class CanSatState:
                 self.gps_hdop = gps_hdop
             if gps_heading_baseline_m is not None:
                 self.gps_heading_baseline_m = gps_heading_baseline_m
+            if gps_fix_accepted:
+                self.gps_fix_seq += 1
 
     def update_barometer(self, alt=None, pres=None):
         with self.lock:
@@ -184,6 +188,7 @@ class CanSatState:
                 "gps_fix_qual": self.gps_fix_qual,
                 "gps_sats": self.gps_sats,
                 "gps_hdop": self.gps_hdop,
+                "gps_fix_seq": self.gps_fix_seq,
                 "nav_heading": self.nav_heading,
                 "nav_heading_source": self.nav_heading_source,
                 "heading_diff": self.heading_diff,

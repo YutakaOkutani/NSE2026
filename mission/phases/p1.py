@@ -13,7 +13,7 @@ from mission.const import (
     DEVICE_LED_GREEN,
     DEVICE_LED_RED,
     PARACHUTE_DIRECTION,
-    PHASE2_STAGE_STRAIGHT,
+    PHASE2_STAGE_ESCAPE,
     Phase,
     TIMEOUT_PHASE_1,
 )
@@ -38,7 +38,7 @@ class Phase1Handler(BasePhaseHandler):
         print("PH1: Parachute Separation TIMEOUT -> switching to Phase2")
         controller.st.update_navigation(phase=int(Phase.PHASE2))
         controller.phase2_start_time = time.time()
-        controller.phase2_stage = PHASE2_STAGE_STRAIGHT
+        controller.phase2_stage = PHASE2_STAGE_ESCAPE
         controller.phase2_stage_start = controller.phase2_start_time
         controller.time_phase1_start = None
 

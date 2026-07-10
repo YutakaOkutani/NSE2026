@@ -93,7 +93,16 @@ class LogSchemaTest(unittest.TestCase):
 
     def test_navigation_diagnostic_columns_are_written_to_log_row(self):
         ctrl = _LogOnlyController()
-        ctrl.st.update_gps(gps_heading=123.4, gps_heading_valid=True, gps_heading_baseline_m=2.5)
+        ctrl.st.update_gps(
+            gps_heading=123.4,
+            gps_heading_valid=True,
+            gps_heading_baseline_m=2.5,
+            gps_fix_accepted=True,
+        )
+        ctrl.phase2_stage = "offset"
+        ctrl.bno_calib = {"valid": True, "value": (3, 2, 1, 2)}
+        ctrl.bno_heading_offset_candidate_deg = 11.8
+        ctrl.bno_heading_offset_candidate_count = 4
         ctrl.st.update_navigation(
             nav_heading=120.0,
             nav_heading_source="BNO_ALIGNED",
@@ -112,6 +121,7 @@ class LogSchemaTest(unittest.TestCase):
 
         self.assertEqual(by_name["GpsHeading"], "123.40")
         self.assertEqual(by_name["GpsHeadingValid"], 1)
+        self.assertEqual(by_name["GPSFixSeq"], 1)
         self.assertEqual(by_name["GPSHeadingBaselineM"], "2.50")
         self.assertEqual(by_name["NavHeading"], "120.00")
         self.assertEqual(by_name["NavHeadingSource"], "BNO_ALIGNED")
@@ -120,6 +130,13 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["BNOTrusted"], 1)
         self.assertEqual(by_name["BNOOffsetDeg"], "12.30")
         self.assertEqual(by_name["BNOOffsetValid"], 1)
+        self.assertEqual(by_name["BNOOffsetCandidateDeg"], "11.80")
+        self.assertEqual(by_name["BNOOffsetCandidateCount"], 4)
+        self.assertEqual(by_name["Phase2Stage"], "offset")
+        self.assertEqual(by_name["BNOCalibSys"], 3)
+        self.assertEqual(by_name["BNOCalibGyro"], 2)
+        self.assertEqual(by_name["BNOCalibAcc"], 1)
+        self.assertEqual(by_name["BNOCalibMag"], 2)
         self.assertEqual(by_name["ArrivalInside"], 1)
         self.assertEqual(by_name["ArrivalConfirmCount"], 3)
         self.assertEqual(by_name["Phase3ArrivedLatched"], 1)

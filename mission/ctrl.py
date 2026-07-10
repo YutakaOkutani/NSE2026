@@ -24,6 +24,7 @@ from mission.const import (
     HEADING_WEIGHT_BNO_MIN,
     HEADING_WEIGHT_BNO_STEP,
     HEADING_WEIGHT_GPS,
+    GPS_HEADING_BASELINE_MIN_DIST,
     LED_SIGNAL_COUNT,
     LOG_DIR,
     LOG_FILE_DATETIME_FORMAT,
@@ -34,7 +35,7 @@ from mission.const import (
     MISSION_TIMEOUT_TOTAL,
     PHASE3_BNO_GPS_OFFSET_ALPHA,
     PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG,
-    PHASE2_STAGE_STRAIGHT,
+    PHASE2_STAGE_ESCAPE,
     Phase,
 )
 from mission.mgr import HardwareManager, LedManager, MotorManager, RadioManager, SensorManager
@@ -131,7 +132,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.bmp_fail_count = 0
         self.bmp_last_reinit_time = 0.0
         self.phase2_start_time = None
-        self.phase2_stage = PHASE2_STAGE_STRAIGHT
+        self.phase2_stage = PHASE2_STAGE_ESCAPE
         self.phase2_stage_start = None
         self.roi_img = None
         self.camera_fail_count = 0
@@ -162,6 +163,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.bno_heading_offset_valid = False
         self.bno_heading_offset_candidate_deg = None
         self.bno_heading_offset_candidate_count = 0
+        self._heading_offset_last_gps_fix_seq = 0
         self.mag_heading_offset_deg = 0.0
         self.mag_heading_offset_valid = False
         self.mag_heading_offset_candidate_deg = None
@@ -243,7 +245,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             self.time_phase1_start = now
         elif phase_enum == Phase.PHASE2:
             self.phase2_start_time = now
-            self.phase2_stage = PHASE2_STAGE_STRAIGHT
+            self.phase2_stage = PHASE2_STAGE_ESCAPE
             self.phase2_stage_start = now
         elif phase_enum == Phase.PHASE3:
             self.time_phase3_start = now
@@ -389,6 +391,14 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if gps_heading is None or bno_heading is None:
             return
 
+        try:
+            gps_fix_seq = int(snapshot.get("gps_fix_seq", 0))
+        except (TypeError, ValueError):
+            return
+        if gps_fix_seq <= self._heading_offset_last_gps_fix_seq:
+            return
+        self._heading_offset_last_gps_fix_seq = gps_fix_seq
+
         observed_offset = self._angle_diff_deg(gps_heading, bno_heading)
         self._update_heading_offset_estimate("bno", observed_offset)
 
@@ -424,6 +434,9 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             return False
         speed = self._coerce_speed(snapshot.get("gps_speed_mps", 0.0))
         if speed < float(HEADING_OFFSET_LEARN_MIN_SPEED_MPS):
+            return False
+        baseline = self._coerce_speed(snapshot.get("gps_heading_baseline_m", 0.0))
+        if baseline < float(GPS_HEADING_BASELINE_MIN_DIST):
             return False
         last_cmd = str(getattr(self, "last_motor_command", {}).get("type", ""))
         if last_cmd == "phase3_gps_turn":
