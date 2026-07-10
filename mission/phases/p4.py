@@ -63,7 +63,7 @@ class Phase4Handler(BasePhaseHandler):
                 controller.target_lng,
             )
             controller.st.update_navigation(distance=dist_m, azimuth=azimuth)
-            if dist_m > GPS_PHASE45_MAX_DISTANCE:
+            if dist_m > GPS_PHASE45_MAX_DISTANCE and not getattr(controller, "phase3_arrived_latched", False):
                 self._fallback_to_p3(
                     controller,
                     current_snapshot,

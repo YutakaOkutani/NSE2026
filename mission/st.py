@@ -26,6 +26,14 @@ class CanSatState:
         self.nav_heading = DEFAULT_FLOAT_VALUE
         self.nav_heading_source = ""
         self.heading_diff = DEFAULT_FLOAT_VALUE
+        self.heading_trust = DEFAULT_FLOAT_VALUE
+        self.bno_trusted = False
+        self.bno_offset_deg = DEFAULT_FLOAT_VALUE
+        self.bno_offset_valid = False
+        self.gps_heading_baseline_m = DEFAULT_FLOAT_VALUE
+        self.arrival_inside = False
+        self.arrival_confirm_count = 0
+        self.phase3_arrived_latched = False
         self.alt = DEFAULT_FLOAT_VALUE
         self.pres = DEFAULT_FLOAT_VALUE
         self.distance = DEFAULT_FLOAT_VALUE
@@ -68,6 +76,7 @@ class CanSatState:
         gps_fix_qual=None,
         gps_sats=None,
         gps_hdop=None,
+        gps_heading_baseline_m=None,
     ):
         with self.lock:
             if lat is not None:
@@ -88,6 +97,8 @@ class CanSatState:
                 self.gps_sats = gps_sats
             if gps_hdop is not None:
                 self.gps_hdop = gps_hdop
+            if gps_heading_baseline_m is not None:
+                self.gps_heading_baseline_m = gps_heading_baseline_m
 
     def update_barometer(self, alt=None, pres=None):
         with self.lock:
@@ -105,6 +116,13 @@ class CanSatState:
         nav_heading=None,
         nav_heading_source=None,
         heading_diff=None,
+        heading_trust=None,
+        bno_trusted=None,
+        bno_offset_deg=None,
+        bno_offset_valid=None,
+        arrival_inside=None,
+        arrival_confirm_count=None,
+        phase3_arrived_latched=None,
     ):
         with self.lock:
             if distance is not None:
@@ -121,6 +139,20 @@ class CanSatState:
                 self.nav_heading_source = nav_heading_source
             if heading_diff is not None:
                 self.heading_diff = heading_diff
+            if heading_trust is not None:
+                self.heading_trust = heading_trust
+            if bno_trusted is not None:
+                self.bno_trusted = bno_trusted
+            if bno_offset_deg is not None:
+                self.bno_offset_deg = bno_offset_deg
+            if bno_offset_valid is not None:
+                self.bno_offset_valid = bno_offset_valid
+            if arrival_inside is not None:
+                self.arrival_inside = arrival_inside
+            if arrival_confirm_count is not None:
+                self.arrival_confirm_count = arrival_confirm_count
+            if phase3_arrived_latched is not None:
+                self.phase3_arrived_latched = phase3_arrived_latched
 
     def update_cone(self, cone_direction=None, cone_probability=None, cone_is_reached=None, cone_method=None):
         with self.lock:
@@ -155,6 +187,14 @@ class CanSatState:
                 "nav_heading": self.nav_heading,
                 "nav_heading_source": self.nav_heading_source,
                 "heading_diff": self.heading_diff,
+                "heading_trust": self.heading_trust,
+                "bno_trusted": self.bno_trusted,
+                "bno_offset_deg": self.bno_offset_deg,
+                "bno_offset_valid": self.bno_offset_valid,
+                "gps_heading_baseline_m": self.gps_heading_baseline_m,
+                "arrival_inside": self.arrival_inside,
+                "arrival_confirm_count": self.arrival_confirm_count,
+                "phase3_arrived_latched": self.phase3_arrived_latched,
                 "alt": self.alt,
                 "pres": self.pres,
                 "distance": self.distance,

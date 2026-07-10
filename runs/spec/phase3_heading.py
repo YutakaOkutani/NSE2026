@@ -20,6 +20,7 @@ class _HeadingOnlyController(MotorManager):
         self.bno_heading_offset_deg = 0.0
         self.mag_heading_offset_valid = False
         self.mag_heading_offset_deg = 0.0
+        self.bno_stale_sec = 0.0
 
     def _normalize_heading_deg(self, value):
         try:
@@ -82,6 +83,24 @@ class Phase3HeadingTest(unittest.TestCase):
 
         self.assertEqual(source, "GPS_PRIMARY")
         self.assertAlmostEqual(heading, 90.0)
+
+    def test_does_not_fall_back_to_mag_when_bno_and_gps_are_untrusted(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.mag_heading_offset_valid = True
+        ctrl.mag_heading_offset_deg = 25.0
+
+        heading, source = ctrl._phase3_heading(
+            {
+                "gps_heading_valid": False,
+                "gps_heading": 0.0,
+                "angle_valid": False,
+                "angle": 30.0,
+                "mag": [100.0, 25.0, 0.0],
+            }
+        )
+
+        self.assertIsNone(heading)
+        self.assertNotEqual(source, "MAG_ALIGNED")
 
 
 if __name__ == "__main__":

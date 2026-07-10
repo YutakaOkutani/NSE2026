@@ -91,6 +91,39 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["Phase0ExitReason"], "impact")
         self.assertEqual(by_name["Phase0ExitDetail"], "delta=8.20")
 
+    def test_navigation_diagnostic_columns_are_written_to_log_row(self):
+        ctrl = _LogOnlyController()
+        ctrl.st.update_gps(gps_heading=123.4, gps_heading_valid=True, gps_heading_baseline_m=2.5)
+        ctrl.st.update_navigation(
+            nav_heading=120.0,
+            nav_heading_source="BNO_ALIGNED",
+            heading_diff=3.4,
+            heading_trust=1.0,
+            bno_trusted=True,
+            bno_offset_deg=12.3,
+            bno_offset_valid=True,
+            arrival_inside=True,
+            arrival_confirm_count=3,
+            phase3_arrived_latched=True,
+        )
+
+        row = ctrl._build_log_row()
+        by_name = dict(zip(LOG_HEADER, row))
+
+        self.assertEqual(by_name["GpsHeading"], "123.40")
+        self.assertEqual(by_name["GpsHeadingValid"], 1)
+        self.assertEqual(by_name["GPSHeadingBaselineM"], "2.50")
+        self.assertEqual(by_name["NavHeading"], "120.00")
+        self.assertEqual(by_name["NavHeadingSource"], "BNO_ALIGNED")
+        self.assertEqual(by_name["HeadingDiff"], "3.40")
+        self.assertEqual(by_name["HeadingTrust"], "1.00")
+        self.assertEqual(by_name["BNOTrusted"], 1)
+        self.assertEqual(by_name["BNOOffsetDeg"], "12.30")
+        self.assertEqual(by_name["BNOOffsetValid"], 1)
+        self.assertEqual(by_name["ArrivalInside"], 1)
+        self.assertEqual(by_name["ArrivalConfirmCount"], 3)
+        self.assertEqual(by_name["Phase3ArrivedLatched"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,8 @@ from mission.const import (
     GPS_LOST_LOG_INTERVAL,
     LED_INTERVAL_PHASE3,
     PHASE_LOG_INTERVAL,
+    PHASE3_ARRIVAL_CONFIRM_COUNT,
+    PHASE3_ARRIVAL_CONFIRM_SEC,
     Phase,
     TIMEOUT_PHASE_3,
 )
@@ -39,6 +41,35 @@ class Phase3Handler(BasePhaseHandler):
         if snapshot["gps_detect"] == GPS_ACTIVE_DETECT:
             dist, azimuth = calc_distance_and_azimuth(snapshot["lat"], snapshot["lng"], controller.target_lat, controller.target_lng)
             controller.st.update_navigation(distance=dist, azimuth=azimuth, direction=azimuth)
+            inside_arrival = dist <= GPS_CLOSE_DISTANCE
+            now = time.time()
+            if getattr(controller, "phase3_arrived_latched", False):
+                controller.st.update_navigation(
+                    arrival_inside=True,
+                    arrival_confirm_count=getattr(controller, "phase3_arrival_confirm_count", 0),
+                    phase3_arrived_latched=True,
+                )
+                controller.st.update_navigation(phase=int(Phase.PHASE4))
+                controller.time_phase4_start = now
+                return
+            if inside_arrival:
+                controller.phase3_arrival_confirm_count = int(
+                    getattr(controller, "phase3_arrival_confirm_count", 0)
+                ) + 1
+                if getattr(controller, "phase3_arrival_inside_since", None) is None:
+                    controller.phase3_arrival_inside_since = now
+            else:
+                controller.phase3_arrival_confirm_count = 0
+                controller.phase3_arrival_inside_since = None
+            inside_since = getattr(controller, "phase3_arrival_inside_since", None)
+            inside_elapsed = (now - inside_since) if inside_since is not None else 0.0
+            arrival_confirmed = (
+                inside_arrival
+                and (
+                    controller.phase3_arrival_confirm_count >= int(PHASE3_ARRIVAL_CONFIRM_COUNT)
+                    or inside_elapsed >= float(PHASE3_ARRIVAL_CONFIRM_SEC)
+                )
+            )
             nav_heading = None
             nav_heading_source = "INVALID"
             if hasattr(controller, "_phase3_heading"):
@@ -53,6 +84,13 @@ class Phase3Handler(BasePhaseHandler):
                 nav_heading=nav_heading if nav_heading is not None else 0.0,
                 nav_heading_source=nav_heading_source,
                 heading_diff=heading_diff if heading_diff is not None else 0.0,
+                heading_trust=getattr(controller, "_phase3_last_heading_trust", 0.0),
+                bno_trusted=bool(getattr(controller, "_phase3_last_bno_trusted", False)),
+                bno_offset_deg=float(getattr(controller, "bno_heading_offset_deg", 0.0)),
+                bno_offset_valid=bool(getattr(controller, "bno_heading_offset_valid", False)),
+                arrival_inside=inside_arrival,
+                arrival_confirm_count=controller.phase3_arrival_confirm_count,
+                phase3_arrived_latched=bool(getattr(controller, "phase3_arrived_latched", False)),
             )
             if controller.led_blink_timer % PHASE_LOG_INTERVAL == 0:
                 if nav_heading is not None and heading_diff is not None:
@@ -69,10 +107,15 @@ class Phase3Handler(BasePhaseHandler):
                         f"GPSSpeed={float(snapshot.get('gps_speed_mps', 0.0)):.2f}m/s, "
                         f"BNOStale={float(getattr(controller, 'bno_stale_sec', 0.0)):.2f}s"
                     )
-            if dist < GPS_CLOSE_DISTANCE:
-                print(f"Close enough ({dist:.1f}m): switching to Phase4")
+            if arrival_confirmed:
+                controller.phase3_arrived_latched = True
+                controller.st.update_navigation(phase3_arrived_latched=True)
+                print(
+                    f"Close enough ({dist:.1f}m, confirm={controller.phase3_arrival_confirm_count}, "
+                    f"inside={inside_elapsed:.1f}s): switching to Phase4"
+                )
                 controller.st.update_navigation(phase=int(Phase.PHASE4))
-                controller.time_phase4_start = time.time()
+                controller.time_phase4_start = now
         else:
             if controller.led_blink_timer % GPS_LOST_LOG_INTERVAL == 0:
                 print("GPS Lost: Keep going...")

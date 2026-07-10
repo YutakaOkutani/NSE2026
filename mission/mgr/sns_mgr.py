@@ -179,6 +179,14 @@ class SensorManager:
             f"{self._coerce_float(current_data.get('nav_heading', 0.0)):.2f}",
             str(current_data.get("nav_heading_source", "")),
             f"{self._coerce_float(current_data.get('heading_diff', 0.0)):.2f}",
+            f"{self._coerce_float(current_data.get('heading_trust', 0.0)):.2f}",
+            self._coerce_int(bool(current_data.get("bno_trusted", False))),
+            f"{self._coerce_float(current_data.get('bno_offset_deg', 0.0)):.2f}",
+            self._coerce_int(bool(current_data.get("bno_offset_valid", False))),
+            f"{self._coerce_float(current_data.get('gps_heading_baseline_m', 0.0)):.2f}",
+            self._coerce_int(bool(current_data.get("arrival_inside", False))),
+            self._coerce_int(current_data.get("arrival_confirm_count", 0)),
+            self._coerce_int(bool(current_data.get("phase3_arrived_latched", False))),
             f"{self._coerce_float(current_data.get('alt', 0.0)):.2f}",
             f"{self._coerce_float(current_data.get('pres', 0.0)):.2f}",
             f"{self._coerce_float(current_data.get('distance', 0.0)):.2f}",
@@ -842,6 +850,7 @@ class SensorManager:
                 if stable_count >= GPS_STABLE_FIX_COUNT:
                     gps_heading = None
                     gps_heading_valid = False
+                    gps_heading_baseline_m = 0.0
                     gps_speed_mps = 0.0
                     recent_valid_fixes.append((now, lat, lng))
                     cutoff = now - max(1.0, float(GPS_HEADING_WINDOW_SEC))
@@ -854,6 +863,7 @@ class SensorManager:
                         if dist >= GPS_HEADING_MIN_DIST:
                             gps_heading = course
                             gps_heading_valid = True
+                            gps_heading_baseline_m = dist
                     if not gps_heading_valid and recent_valid_fixes:
                         best_dist = 0.0
                         best_course = None
@@ -865,18 +875,21 @@ class SensorManager:
                         if best_course is not None:
                             gps_heading = best_course
                             gps_heading_valid = True
+                            gps_heading_baseline_m = best_dist
                     if gps_heading_valid and gps_heading is not None:
                         last_heading = gps_heading
                         last_heading_time = now
                     elif last_heading is not None and (now - last_heading_time) <= GPS_HEADING_HOLD_SEC:
                         gps_heading = last_heading
                         gps_heading_valid = True
+                        gps_heading_baseline_m = 0.0
                     self.st.update_gps(
                         lat=lat,
                         lng=lng,
                         gps_detect=GPS_ACTIVE_DETECT,
                         gps_heading=gps_heading,
                         gps_heading_valid=gps_heading_valid,
+                        gps_heading_baseline_m=gps_heading_baseline_m,
                         gps_speed_mps=gps_speed_mps,
                         gps_fix_qual=gps_fix_qual_val,
                         gps_sats=gps_sats_val,

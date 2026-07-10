@@ -53,6 +53,9 @@ from mission.const import (
     PHASE3_GPS_FALLBACK_DEADBAND_DEG,
     PHASE3_GPS_FALLBACK_TURN_SCALE,
     PHASE3_HEADING_DEADBAND_DEG,
+    PHASE3_BNO_TRUST_MAX_JUMP_DEG,
+    PHASE3_BNO_TRUST_MAX_OFFSET_DEG,
+    PHASE3_BNO_TRUST_MAX_STALE_SEC,
     PHASE3_LARGE_ERROR_DEG,
     PHASE3_LARGE_ERROR_INNER_SPEED,
     PHASE3_LARGE_ERROR_OUTER_SPEED,
@@ -170,47 +173,59 @@ class MotorManager:
         except (TypeError, ValueError):
             angle = 0.0
 
-        mag_heading = self._mag_heading_from_snapshot(snapshot)
-        mag_stuck = False
-        if mag_heading is not None:
-            mag_stuck = self._mag_heading_is_stuck(mag_heading)
-
         if gps_heading is not None:
-            if mag_heading is not None and hasattr(self, "_update_mag_heading_offset_from_gps"):
-                self._update_mag_heading_offset_from_gps(snapshot, gps_heading, mag_heading)
             if snapshot.get("angle_valid", False) and math.isfinite(angle) and hasattr(self, "_update_bno_heading_offset_from_gps"):
                 self._update_bno_heading_offset_from_gps(snapshot)
 
-        if snapshot.get("angle_valid", False) and math.isfinite(angle):
+        bno_trusted = self._phase3_bno_trusted(snapshot, angle)
+        self._phase3_last_bno_trusted = bno_trusted
+        if bno_trusted:
             if getattr(self, "bno_heading_offset_valid", False) and hasattr(self, "_bno_heading_aligned_to_gps"):
                 aligned = self._bno_heading_aligned_to_gps(snapshot)
                 if aligned is not None:
+                    self._phase3_last_heading_trust = 1.0
                     return aligned, "BNO_ALIGNED"
 
         if gps_heading is not None:
+            self._phase3_last_heading_trust = 0.45
             return gps_heading, "GPS_PRIMARY"
 
-        if snapshot.get("angle_valid", False) and math.isfinite(angle):
-            if getattr(self, "bno_heading_offset_valid", False) and hasattr(self, "_bno_heading_aligned_to_gps"):
-                aligned = self._bno_heading_aligned_to_gps(snapshot)
-                if aligned is not None:
-                    return aligned, "BNO_ALIGNED"
-
-        if mag_heading is not None and not mag_stuck:
-            if getattr(self, "mag_heading_offset_valid", False) and hasattr(self, "_mag_heading_aligned_to_gps"):
-                aligned = self._mag_heading_aligned_to_gps(mag_heading)
-                if aligned is not None:
-                    return aligned, "MAG_ALIGNED"
-
-        if mag_stuck:
-            return None, "MAG_STUCK"
         if snapshot.get("angle_valid", False):
-            return None, "BNO_UNALIGNED"
-        if mag_heading is not None:
-            return None, "MAG_UNALIGNED"
+            self._phase3_last_heading_trust = 0.0
+            return None, "BNO_UNTRUSTED"
         if snapshot.get("gps_heading_valid", False):
+            self._phase3_last_heading_trust = 0.0
             return None, "GPS_PARSE_FAIL"
+        self._phase3_last_heading_trust = 0.0
         return None, "NO_HEADING_SOURCE"
+
+    def _phase3_bno_trusted(self, snapshot, angle=None):
+        if not snapshot.get("angle_valid", False):
+            return False
+        if angle is None:
+            try:
+                angle = float(snapshot.get("angle", 0.0))
+            except (TypeError, ValueError):
+                return False
+        if not math.isfinite(angle):
+            return False
+        stale = float(getattr(self, "bno_stale_sec", 999.0))
+        if stale > float(PHASE3_BNO_TRUST_MAX_STALE_SEC):
+            return False
+        if not getattr(self, "bno_heading_offset_valid", False):
+            return False
+        offset = self._normalize_heading_deg(getattr(self, "bno_heading_offset_deg", 0.0))
+        if offset is None:
+            return False
+        if abs(self._angle_diff_deg(offset, 0.0)) > float(PHASE3_BNO_TRUST_MAX_OFFSET_DEG):
+            return False
+        last = getattr(self, "_phase3_last_trusted_bno_angle", None)
+        if last is not None:
+            jump = abs(self._angle_diff_deg(angle, last))
+            if jump > float(PHASE3_BNO_TRUST_MAX_JUMP_DEG):
+                return False
+        self._phase3_last_trusted_bno_angle = angle
+        return True
 
     def _clamp_percent(self, value):
         return max(PWM_PERCENT_MIN, min(PWM_PERCENT_MAX, value))

@@ -11,6 +11,7 @@ from mission.const import (
     DEFAULT_VECTOR3,
     DEVICE_KEYS,
     HEADING_OFFSET_LEARN_BOOTSTRAP_SAMPLES,
+    HEADING_OFFSET_LEARN_MAX_ABS_OFFSET_DEG,
     HEADING_OFFSET_LEARN_MAX_RESIDUAL_DEG,
     HEADING_OFFSET_LEARN_MIN_SPEED_MPS,
     HEADING_MAG_CALIB_MAX,
@@ -152,6 +153,9 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase0_wait_log_counter = 0
         self.obstacle_detect_count = 0
         self.phase3_no_heading_start = None
+        self.phase3_arrival_confirm_count = 0
+        self.phase3_arrival_inside_since = None
+        self.phase3_arrived_latched = False
         self.phase4_detect_confirm_count = 0
         self.phase4_detect_confirm_marker = None
         self.bno_heading_offset_deg = 0.0
@@ -419,7 +423,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if not snapshot.get("gps_heading_valid", False):
             return False
         speed = self._coerce_speed(snapshot.get("gps_speed_mps", 0.0))
-        return speed >= float(HEADING_OFFSET_LEARN_MIN_SPEED_MPS)
+        if speed < float(HEADING_OFFSET_LEARN_MIN_SPEED_MPS):
+            return False
+        last_cmd = str(getattr(self, "last_motor_command", {}).get("type", ""))
+        if last_cmd == "phase3_gps_turn":
+            return False
+        return True
 
     def _coerce_speed(self, value):
         try:
@@ -431,9 +440,13 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         return max(0.0, speed)
 
     def _update_heading_offset_estimate(self, prefix, observed_offset):
-        observed_offset = self._normalize_heading_deg(observed_offset)
-        if observed_offset is None:
+        observed_offset_norm = self._normalize_heading_deg(observed_offset)
+        if observed_offset_norm is None:
             return
+        observed_offset_abs = abs(self._angle_diff_deg(observed_offset_norm, 0.0))
+        if observed_offset_abs > float(HEADING_OFFSET_LEARN_MAX_ABS_OFFSET_DEG):
+            return
+        observed_offset = observed_offset_norm
 
         offset_attr = f"{prefix}_heading_offset_deg"
         valid_attr = f"{prefix}_heading_offset_valid"
