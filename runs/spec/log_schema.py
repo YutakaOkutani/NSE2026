@@ -3,6 +3,7 @@ import types
 import unittest
 import importlib.util
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -112,7 +113,13 @@ class LogSchemaTest(unittest.TestCase):
         ctrl.phase2_offset_bno_spread_deg = 3.5
         ctrl.phase2_offset_subsegment_diff_deg = 4.0
         ctrl.phase2_offset_attempt_count = 1
+        ctrl.phase2_offset_mode = "turnaround"
+        ctrl.phase2_offset_turn_target_deg = 298.0
+        ctrl.phase2_offset_stage_retry_count = 1
         ctrl.phase2_offset_reject_reason = ""
+        ctrl.bno_heading_recovery_active = True
+        ctrl.bno_heading_recovery_count = 2
+        ctrl.bno_heading_recovery_seq = 1
         ctrl.st.update_navigation(
             nav_heading=120.0,
             nav_heading_source="BNO_ALIGNED",
@@ -156,10 +163,33 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["Phase2OffsetBNOSpreadDeg"], "3.50")
         self.assertEqual(by_name["Phase2OffsetSubsegmentDiffDeg"], "4.00")
         self.assertEqual(by_name["Phase2OffsetAttemptCount"], 1)
+        self.assertEqual(by_name["Phase2OffsetMode"], "turnaround")
+        self.assertEqual(by_name["Phase2OffsetTurnTargetDeg"], "298.00")
+        self.assertEqual(by_name["Phase2OffsetStageRetryCount"], 1)
         self.assertEqual(by_name["Phase2OffsetRejectReason"], "")
+        self.assertEqual(by_name["BNORecoveryActive"], 1)
+        self.assertEqual(by_name["BNORecoveryCount"], 2)
+        self.assertEqual(by_name["BNORecoverySeq"], 1)
         self.assertEqual(by_name["ArrivalInside"], 1)
         self.assertEqual(by_name["ArrivalConfirmCount"], 3)
         self.assertEqual(by_name["Phase3ArrivedLatched"], 1)
+
+    def test_bno_heading_rebootstraps_after_stable_dropout_samples(self):
+        ctrl = _LogOnlyController()
+        ctrl.bno_last_valid_time = 100.0
+        ctrl.bno_last_valid = {"angle": 10.0}
+        ctrl.bno_heading_recovery_seq = 0
+
+        with patch.object(sns_mgr_under_test.time, "time", return_value=100.1):
+            self.assertFalse(ctrl._angle_jump_ok(100.0))
+        with patch.object(sns_mgr_under_test.time, "time", return_value=101.0):
+            self.assertFalse(ctrl._angle_jump_ok(100.0))
+        with patch.object(sns_mgr_under_test.time, "time", return_value=101.2):
+            self.assertFalse(ctrl._angle_jump_ok(102.0))
+        with patch.object(sns_mgr_under_test.time, "time", return_value=101.4):
+            self.assertTrue(ctrl._angle_jump_ok(104.0))
+
+        self.assertEqual(ctrl.bno_heading_recovery_seq, 1)
 
 
 if __name__ == "__main__":

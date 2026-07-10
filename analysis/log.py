@@ -109,6 +109,9 @@ COLUMN_GROUPS = [
             "Phase2OffsetBNOSpreadDeg",
             "Phase2OffsetSubsegmentDiffDeg",
             "Phase2OffsetAttemptCount",
+            "Phase2OffsetMode",
+            "Phase2OffsetTurnTargetDeg",
+            "Phase2OffsetStageRetryCount",
             "Phase2OffsetRejectReason",
             "ArrivalInside",
             "ArrivalConfirmCount",
@@ -123,7 +126,13 @@ COLUMN_GROUPS = [
     {
         "key": "fall_and_sensor_health",
         "title": "Fall & Sensor Health",
-        "cols": ["Fall", "BNOStaleSec"],
+        "cols": [
+            "Fall",
+            "BNOStaleSec",
+            "BNORecoveryActive",
+            "BNORecoveryCount",
+            "BNORecoverySeq",
+        ],
     },
     {
         "key": "motor_commands",

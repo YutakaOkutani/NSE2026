@@ -26,6 +26,9 @@ from mission.const import (
     BNO_FREEZE_EPS,
     BNO_FUSION_OK_STATES,
     BNO_GYRO_MAX,
+    BNO_HEADING_RECOVERY_MAX_STEP_DEG,
+    BNO_HEADING_RECOVERY_SAMPLES,
+    BNO_HEADING_RECOVERY_STALE_SEC,
     BNO_MAG_MAX,
     BNO_REINIT_COOLDOWN,
     BNO_STALE_TIMEOUT,
@@ -204,6 +207,9 @@ class SensorManager:
             f"{self._coerce_float(getattr(self, 'phase2_offset_bno_spread_deg', 0.0)):.2f}",
             f"{self._coerce_float(getattr(self, 'phase2_offset_subsegment_diff_deg', 0.0)):.2f}",
             self._coerce_int(getattr(self, "phase2_offset_attempt_count", 0)),
+            str(getattr(self, "phase2_offset_mode", "")),
+            f"{self._coerce_float(getattr(self, 'phase2_offset_turn_target_deg', 0.0)):.2f}",
+            self._coerce_int(getattr(self, "phase2_offset_stage_retry_count", 0)),
             str(getattr(self, "phase2_offset_reject_reason", "")),
             self._coerce_int(bool(current_data.get("arrival_inside", False))),
             self._coerce_int(current_data.get("arrival_confirm_count", 0)),
@@ -223,6 +229,9 @@ class SensorManager:
             f"{self._coerce_float(current_data.get('obstacle_dist', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("angle_valid", False))),
             f"{bno_stale_sec:.2f}",
+            self._coerce_int(bool(getattr(self, "bno_heading_recovery_active", False))),
+            self._coerce_int(getattr(self, "bno_heading_recovery_count", 0)),
+            self._coerce_int(getattr(self, "bno_heading_recovery_seq", 0)),
             self._coerce_int(
                 bool(
                     bno_last_acc_time > 0.0
@@ -337,13 +346,48 @@ class SensorManager:
             self.bmp_stale_sec = BNO_STALE_TIMEOUT + 1.0
 
     def _angle_jump_ok(self, angle):
-        # Bootstrap the jump filter: before the first accepted sample (or after long
-        # dropout), there is no reliable previous heading to compare against.
         if self.bno_last_valid_time <= 0:
+            self.bno_heading_recovery_active = False
+            self.bno_heading_recovery_count = 0
+            self._bno_heading_recovery_candidate = None
             return True
         last = self.bno_last_valid.get("angle", 0.0)
         diff = abs(((angle - last + 180.0) % 360.0) - 180.0)
-        return diff <= BNO_ANGLE_JUMP_MAX
+        if diff <= BNO_ANGLE_JUMP_MAX:
+            self.bno_heading_recovery_active = False
+            self.bno_heading_recovery_count = 0
+            self._bno_heading_recovery_candidate = None
+            return True
+
+        stale_sec = max(0.0, time.time() - self.bno_last_valid_time)
+        if stale_sec < float(BNO_HEADING_RECOVERY_STALE_SEC):
+            self.bno_heading_recovery_active = False
+            self.bno_heading_recovery_count = 0
+            self._bno_heading_recovery_candidate = None
+            return False
+
+        previous = getattr(self, "_bno_heading_recovery_candidate", None)
+        if previous is None:
+            recovery_count = 1
+        else:
+            recovery_step = abs(((angle - previous + 180.0) % 360.0) - 180.0)
+            recovery_count = (
+                int(getattr(self, "bno_heading_recovery_count", 0)) + 1
+                if recovery_step <= float(BNO_HEADING_RECOVERY_MAX_STEP_DEG)
+                else 1
+            )
+        self._bno_heading_recovery_candidate = angle
+        self.bno_heading_recovery_active = True
+        self.bno_heading_recovery_count = recovery_count
+        if recovery_count < int(BNO_HEADING_RECOVERY_SAMPLES):
+            return False
+
+        self.bno_heading_recovery_active = False
+        self.bno_heading_recovery_count = 0
+        self._bno_heading_recovery_candidate = None
+        self.bno_heading_recovery_seq = int(getattr(self, "bno_heading_recovery_seq", 0)) + 1
+        print(f"BNO heading recovered at {angle:.1f} deg after {stale_sec:.2f}s dropout")
+        return True
 
     def _try_reinit_bno(self):
         now = time.time()
@@ -489,14 +533,20 @@ class SensorManager:
             angle_val = 0.0
             if euler["valid"] and len(euler["value"]) >= 1:
                 angle_val = float(euler["value"][0])
-            angle_jump_ok = self._angle_jump_ok(angle_val)
-            angle_ok = (
+            angle_sample_valid = (
                 (not freeze)
                 and euler["valid"]
                 and math.isfinite(angle_val)
                 and 0.0 <= angle_val < 360.0
-                and angle_jump_ok
             )
+            if angle_sample_valid:
+                angle_jump_ok = self._angle_jump_ok(angle_val)
+            else:
+                angle_jump_ok = False
+                self.bno_heading_recovery_active = False
+                self.bno_heading_recovery_count = 0
+                self._bno_heading_recovery_candidate = None
+            angle_ok = angle_sample_valid and angle_jump_ok
 
             sys_ok = sys_status["valid"] and sys_error["valid"]
             sys_error_ok = sys_ok and sys_error["value"] == 0

@@ -36,6 +36,7 @@ from mission.const import (
     PHASE3_BNO_GPS_OFFSET_ALPHA,
     PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG,
     PHASE2_STAGE_ESCAPE,
+    PHASE2_OFFSET_MODE_COLLECT,
     Phase,
 )
 from mission.mgr import HardwareManager, LedManager, MotorManager, RadioManager, SensorManager
@@ -126,6 +127,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.bno_last_valid_time = 0.0
         self.bno_stale_sec = 0.0
         self.bno_acc_stale_sec = 0.0
+        self.bno_heading_recovery_active = False
+        self.bno_heading_recovery_count = 0
+        self.bno_heading_recovery_seq = 0
+        self._bno_heading_recovery_candidate = None
         self.bno_calib = dict(DEFAULT_BNO_CALIB)
         self.bmp_last_valid_time = 0.0
         self.bmp_stale_sec = 0.0
@@ -134,6 +139,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase2_start_time = None
         self.phase2_stage = PHASE2_STAGE_ESCAPE
         self.phase2_stage_start = None
+        self.phase2_calib_ready_since = None
         self.phase2_offset_reference_bno_deg = None
         self.phase2_offset_heading_error_deg = 0.0
         self.phase2_offset_samples = []
@@ -145,6 +151,13 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase2_offset_bno_spread_deg = 0.0
         self.phase2_offset_subsegment_diff_deg = 0.0
         self.phase2_offset_attempt_count = 0
+        self.phase2_offset_mode = PHASE2_OFFSET_MODE_COLLECT
+        self.phase2_offset_turn_target_deg = None
+        self.phase2_offset_turn_confirm_count = 0
+        self.phase2_offset_stage_retry_count = 0
+        self.phase2_offset_settle_until = 0.0
+        self.phase2_offset_leg_start_time = 0.0
+        self.phase2_offset_observed_bno_recovery_seq = 0
         self.phase2_offset_reject_reason = ""
         self.roi_img = None
         self.camera_fail_count = 0
@@ -259,6 +272,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             self.phase2_start_time = now
             self.phase2_stage = PHASE2_STAGE_ESCAPE
             self.phase2_stage_start = now
+            self.phase2_calib_ready_since = None
         elif phase_enum == Phase.PHASE3:
             self.time_phase3_start = now
         elif phase_enum == Phase.PHASE4:
@@ -320,6 +334,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
 
         # 個別フェーズの累積超過は、定数で定義された遷移先へ強制遷移する。
         next_phase = MISSION_PHASE_TIMEOUT_TRANSITIONS.get(current_phase, Phase.PHASE6)
+        if current_phase == Phase.PHASE2:
+            if getattr(self, "phase3_arrived_latched", False):
+                next_phase = Phase.PHASE4
+            elif not getattr(self, "bno_heading_offset_valid", False):
+                next_phase = Phase.PHASE7
+                self.mission_end_reason = "PHASE2_OFFSET_FAILED"
         print(
             f"{current_phase.name} cumulative timeout ({phase_elapsed:.1f}s / {phase_budget:.1f}s): "
             f"forcing {next_phase.name}"

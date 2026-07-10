@@ -23,6 +23,14 @@ class _HeadingOnlyController(MotorManager):
         self.bno_stale_sec = 0.0
         self.phase2_offset_reference_bno_deg = None
         self.phase2_offset_heading_error_deg = 0.0
+        self.phase2_offset_turn_target_deg = None
+        self.motor_commands = []
+
+    def set_motors(self, *args, **kwargs):
+        self.motor_commands.append((args, kwargs))
+
+    def stop_motors(self):
+        self.motor_commands.append(((0.0, True, 0.0, True), {"cmd_type": "stop"}))
 
     def _normalize_heading_deg(self, value):
         try:
@@ -52,6 +60,28 @@ class _HeadingOnlyController(MotorManager):
 
 
 class Phase3HeadingTest(unittest.TestCase):
+    def test_phase2_calibration_rotates_in_place_and_alternates(self):
+        ctrl = _HeadingOnlyController()
+
+        first = ctrl._phase2_calibration_pattern(0.0)
+        second = ctrl._phase2_calibration_pattern(3.1)
+
+        self.assertEqual(first[0], first[2])
+        self.assertEqual(second[0], second[2])
+        self.assertEqual(first[1:], (False, first[2], True))
+        self.assertEqual(second[1:], (True, second[2], False))
+
+    def test_phase2_turnaround_uses_counter_rotation(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase2_offset_turn_target_deg = 100.0
+
+        ctrl._drive_phase2_offset_turnaround({"angle_valid": True, "angle": 90.0})
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertTrue(args[1])
+        self.assertFalse(args[3])
+        self.assertEqual(kwargs["cmd_type"], "phase2_offset_turnaround_right")
+
     def test_phase2_offset_hold_steers_back_to_relative_bno_heading(self):
         ctrl = _HeadingOnlyController()
         ctrl.phase2_offset_reference_bno_deg = 100.0

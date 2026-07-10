@@ -8,8 +8,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from mission.const import (
+    MISSION_PHASE3_CUMULATIVE_BUDGET,
+    MISSION_PHASE3_MIN_RESERVE_SEC,
     PHASE2_CALIB_MIN_TIME,
+    PHASE2_CALIB_STABLE_SEC,
     PHASE2_OFFSET_CONTROL_SETTLE_TIME,
+    PHASE2_OFFSET_LEG_MAX_TIME,
+    PHASE2_OFFSET_MODE_COLLECT,
+    PHASE2_OFFSET_MODE_TURNAROUND,
     PHASE2_STAGE_CALIBRATION,
     PHASE2_STAGE_ESCAPE,
     PHASE2_STAGE_OFFSET,
@@ -33,6 +39,7 @@ class _Controller:
         self.phase2_start_time = 0.0
         self.phase2_stage = PHASE2_STAGE_ESCAPE
         self.phase2_stage_start = 0.0
+        self.phase2_calib_ready_since = None
         self.led_blink_timer = 0
         self.bno_calib = {"valid": True, "value": (3, 3, 3, 2)}
         self.bno_heading_offset_deg = 0.0
@@ -51,13 +58,35 @@ class _Controller:
         self.phase2_offset_bno_spread_deg = 0.0
         self.phase2_offset_subsegment_diff_deg = 0.0
         self.phase2_offset_attempt_count = 0
+        self.phase2_offset_mode = PHASE2_OFFSET_MODE_COLLECT
+        self.phase2_offset_turn_target_deg = None
+        self.phase2_offset_turn_confirm_count = 0
+        self.phase2_offset_stage_retry_count = 0
+        self.phase2_offset_settle_until = 0.0
+        self.phase2_offset_leg_start_time = 0.0
+        self.phase2_offset_observed_bno_recovery_seq = 0
         self.phase2_offset_reject_reason = ""
+        self.bno_heading_recovery_seq = 0
+        self.phase3_arrival_confirm_count = 0
+        self.phase3_arrival_inside_since = None
+        self.phase3_arrived_latched = False
+        self.phase2_arrival_last_gps_fix_seq = -1
+        self.target_lat = 35.0
+        self.target_lng = 139.0
         self.time_phase3_start = None
+        self.time_phase4_start = None
+        self.mission_end_reason = "RUNNING"
 
     def toggle_led(self, *_args, **_kwargs):
         return None
 
 class Phase2FlowTest(unittest.TestCase):
+    def test_phase2_budget_preserves_minimum_phase3_navigation_time(self):
+        self.assertGreaterEqual(
+            MISSION_PHASE3_CUMULATIVE_BUDGET,
+            MISSION_PHASE3_MIN_RESERVE_SEC,
+        )
+
     def test_escape_transitions_to_calibration(self):
         ctrl = _Controller()
 
@@ -81,8 +110,12 @@ class Phase2FlowTest(unittest.TestCase):
         ctrl.phase2_stage = PHASE2_STAGE_CALIBRATION
         ctrl.bno_heading_offset_valid = True
         ctrl.bno_heading_offset_candidate_count = 9
+        ctrl.phase2_calib_ready_since = 0.0
 
-        with patch("mission.phases.p2.time.time", return_value=PHASE2_CALIB_MIN_TIME + 0.1):
+        with patch(
+            "mission.phases.p2.time.time",
+            return_value=max(PHASE2_CALIB_MIN_TIME, PHASE2_CALIB_STABLE_SEC) + 0.1,
+        ):
             Phase2Handler().execute(ctrl, {"gps_fix_seq": 12})
 
         self.assertEqual(ctrl.phase2_stage, PHASE2_STAGE_OFFSET)
@@ -93,6 +126,7 @@ class Phase2FlowTest(unittest.TestCase):
     def test_valid_offset_completes_phase2(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_settle_until = PHASE2_OFFSET_CONTROL_SETTLE_TIME
         ctrl.bno_heading_offset_deg = 172.0
         ctrl.bno_heading_offset_valid = True
         with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_CONTROL_SETTLE_TIME + 0.1):
@@ -104,6 +138,7 @@ class Phase2FlowTest(unittest.TestCase):
     def test_offset_learning_waits_for_heading_hold_to_settle(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_settle_until = PHASE2_OFFSET_CONTROL_SETTLE_TIME
 
         with patch(
             "mission.phases.p2.time.time",
@@ -116,6 +151,30 @@ class Phase2FlowTest(unittest.TestCase):
 
         self.assertEqual(ctrl.phase2_offset_samples, [])
         self.assertEqual(ctrl.phase2_offset_reference_bno_deg, 270.0)
+
+    def test_goal_latch_waits_for_escape_then_skips_to_phase4(self):
+        ctrl = _Controller()
+        handler = Phase2Handler()
+        snapshots = [
+            {
+                "gps_detect": 1,
+                "gps_fix_seq": index,
+                "lat": 35.0,
+                "lng": 139.0,
+            }
+            for index in (1, 2, 3)
+        ]
+        for now, snapshot in zip((0.1, 0.5, 1.2), snapshots):
+            with patch("mission.phases.p2.time.time", return_value=now):
+                handler.execute(ctrl, snapshot)
+
+        self.assertTrue(ctrl.phase3_arrived_latched)
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE2))
+
+        with patch("mission.phases.p2.time.time", return_value=7.0):
+            handler.execute(ctrl, snapshots[-1])
+
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE4))
 
     def test_interval_estimator_accepts_straight_stable_run(self):
         samples = [
@@ -149,6 +208,85 @@ class Phase2FlowTest(unittest.TestCase):
 
         self.assertFalse(estimate["valid"])
         self.assertEqual(estimate["reason"], "bno_heading_unstable")
+
+    def test_rejected_segment_requests_compact_turnaround(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_reference_bno_deg = 270.0
+        for index in range(8):
+            Phase2Handler._update_offset_segment(
+                ctrl,
+                {
+                    "gps_fix_seq": index + 1,
+                    "lat": 35.0 + index * 0.000012,
+                    "lng": 139.0,
+                    "angle_valid": True,
+                    "angle": 250.0 if index % 2 == 0 else 290.0,
+                },
+            )
+
+        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertIsNotNone(ctrl.phase2_offset_turn_target_deg)
+
+    def test_repeated_offset_timeout_keeps_retrying_in_phase2(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_stage_retry_count = 7
+
+        with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_LEG_MAX_TIME + 0.1):
+            Phase2Handler().execute(ctrl, {"gps_fix_seq": 20})
+
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE2))
+        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertEqual(ctrl.phase2_offset_stage_retry_count, 8)
+        self.assertEqual(ctrl.mission_end_reason, "RUNNING")
+
+    def test_first_offset_timeout_retries_with_turnaround(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+
+        with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_LEG_MAX_TIME + 0.1):
+            Phase2Handler().execute(
+                ctrl,
+                {"gps_fix_seq": 20, "angle_valid": True, "angle": 90.0},
+            )
+
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE2))
+        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertEqual(ctrl.phase2_offset_stage_retry_count, 1)
+
+    def test_turnaround_time_does_not_consume_next_straight_leg(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_mode = PHASE2_OFFSET_MODE_TURNAROUND
+        ctrl.phase2_offset_turn_target_deg = 180.0
+        ctrl.phase2_offset_stage_retry_count = 2
+
+        with patch("mission.phases.p2.time.time", return_value=100.0):
+            Phase2Handler().execute(
+                ctrl,
+                {"gps_fix_seq": 20, "angle_valid": True, "angle": 0.0},
+            )
+
+        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertEqual(ctrl.phase2_offset_stage_retry_count, 2)
+
+    def test_bno_recovery_restarts_offset_reference_and_samples(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_samples = [{"gps_fix_seq": 1}]
+        ctrl.phase2_offset_reference_bno_deg = 10.0
+        ctrl.bno_heading_recovery_seq = 1
+
+        with patch("mission.phases.p2.time.time", return_value=3.0):
+            Phase2Handler().execute(
+                ctrl,
+                {"gps_fix_seq": 20, "angle_valid": True, "angle": 220.0},
+            )
+
+        self.assertEqual(ctrl.phase2_offset_reference_bno_deg, 220.0)
+        self.assertEqual(ctrl.phase2_offset_samples, [])
+        self.assertEqual(ctrl.phase2_offset_reject_reason, "bno_recovered_reset")
 
     def test_interval_collector_latches_valid_offset(self):
         ctrl = _Controller()
