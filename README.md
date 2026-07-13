@@ -216,12 +216,33 @@ enable_uart=1
 dtoverlay=disable-bt
 ```
 
-Bluetooth の UART 初期化サービスも無効化する。
+設定を書き込めたことを確認する。
 
 ```bash
-sudo systemctl disable hciuart
-sudo systemctl mask hciuart
+grep -E '^(enable_uart|dtoverlay=.*(disable-bt|miniuart-bt))' /boot/firmware/config.txt
 ```
+
+期待する出力は次の2行である。`enable_uart=1` しか表示されない場合、`dtoverlay=disable-bt` はまだ設定されていない。
+
+```text
+enable_uart=1
+dtoverlay=disable-bt
+```
+
+次に Bluetooth の UART 初期化サービスを確認する。
+
+```bash
+systemctl is-enabled hciuart.service
+```
+
+`enabled` と表示された場合は無効化・停止・マスクする。
+
+```bash
+sudo systemctl disable --now hciuart.service
+sudo systemctl mask hciuart.service
+```
+
+`disabled` または `masked` なら追加操作は不要。Raspberry Pi OS のバージョンによってはサービス自体が存在せず `not-found` と表示されるが、この場合も無効化対象がないため追加操作は不要である。
 
 本機では Bluetooth を使用しないため、`dtoverlay=miniuart-bt` ではなく `dtoverlay=disable-bt` を使用する。これにより、PL011 UART が GPIO 14/15 側の primary UART になる。
 
@@ -238,11 +259,17 @@ sudo reboot
 再起動後に次を実行する。
 
 ```bash
+grep -E '^(enable_uart|dtoverlay=.*(disable-bt|miniuart-bt))' /boot/firmware/config.txt
+systemctl is-enabled hciuart.service
 ls -l /dev/serial0
 readlink -f /dev/serial0
 ```
 
-`/dev/serial0` の実体が `ttyS0` ではなく、`/dev/ttyAMA0` などの `ttyAMA*`（PL011 UART）になっていることを確認する。
+期待する状態は次のとおり。
+
+* `enable_uart=1` と `dtoverlay=disable-bt` が表示される
+* `hciuart.service` は `disabled`、`masked`、または `not-found`
+* `/dev/serial0` の実体が `ttyS0` ではなく、`/dev/ttyAMA0` などの `ttyAMA*`（PL011 UART）になっている
 
 ```text
 /dev/ttyAMA0
