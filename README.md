@@ -689,6 +689,58 @@ git push -u origin main
 git push
 ```
 
+#### ブランチの作成・切り替え
+
+ブランチを切り替える前に、未コミットの変更がないか確認する。
+
+```bash
+git status
+```
+
+`main` から新しい作業ブランチを作成し、そのブランチへ切り替える場合:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c refactor/remove-multi-airframe
+```
+
+すでにローカルに存在する作業ブランチへ切り替える場合:
+
+```bash
+git switch refactor/remove-multi-airframe
+```
+
+リモートにだけ存在する作業ブランチを初めてローカルへ取得する場合:
+
+```bash
+git fetch origin
+git switch --track origin/refactor/remove-multi-airframe
+```
+
+現在のブランチと、ローカルに存在するブランチの一覧は次のコマンドで確認できる。先頭に `*` があるものが現在のブランチ。
+
+```bash
+git branch
+git status --short --branch
+```
+
+作業ブランチを初めてGitHubへプッシュする場合:
+
+```bash
+git push -u origin refactor/remove-multi-airframe
+```
+
+Pull Requestのマージ後は `main` に戻り、最新版を取得してから不要になったローカルブランチを削除する。
+
+```bash
+git switch main
+git pull --ff-only origin main
+git branch -d refactor/remove-multi-airframe
+```
+
+未コミットの変更があると、安全のためブランチ切り替えが拒否される場合がある。その場合は変更をコミットするか、`git stash` で一時退避してから切り替える。作業中の変更を消す可能性があるため、安易に `--force` を付けない。
+
 ``` bash
 # ローカルを GitHub の最新版で完全に上書きするコマンド
 git fetch origin
