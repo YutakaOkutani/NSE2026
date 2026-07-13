@@ -38,8 +38,8 @@ PROFILE_REGISTRY: dict[str, MachineProfile] = {
         description="1号機用プロファイル。機体固有の補正値はここに集約する。",
         const_overrides={
             "LOG_DIR": str(_DEFAULT_LOG_ROOT / "unit1"),
-            "MOTOR_DIR_INVERT_1": False,
-            "MOTOR_DIR_INVERT_2": True,
+            "MOTOR_DIR_INVERT_1": True,
+            "MOTOR_DIR_INVERT_2": False,
             "MOTOR_SPEED_SCALE_1": 1.00,
             "MOTOR_SPEED_SCALE_2": 1.00,
             "MOTOR_SPEED_OFFSET_1": 0.0,
