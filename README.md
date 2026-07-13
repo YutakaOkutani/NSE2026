@@ -288,19 +288,7 @@ cd NSE2026
 
 ---
 
-## 5.1 機体識別ファイルの作成
-
-各 Raspberry Pi で、リポジトリ直下に `machine.txt` を作成する。1号機なら `unit1`、2号機なら `unit2` を1行で書く。
-
-```bash
-cd ~/NSE2026
-cp machine.txt.example machine.txt
-nano machine.txt
-```
-
-`machine.txt` がない場合、`main.py` は機体固有補正を含まない `common` 扱いになる。本番入口では機体名を引数や環境変数で上書きしない。
-
-## 5.2 ミッション設定ファイルの作成
+## 5.1 ミッション設定ファイルの作成
 
 各 Raspberry Pi で、リポジトリ直下に `mission.toml` を作成し、その日のゴール座標と無線設定を記入する。このファイルはGit管理外なので、座標変更のコミットは不要。
 
@@ -329,7 +317,7 @@ dry_run = false
 
 ---
 
-## 5.3 ドキュメント
+## 5.2 ドキュメント
 
 セットアップと基本コマンドはこの `README.md`、設計・開発方針・運用手順は [`docs/index.md`](docs/index.md) を入口として参照する。
 
@@ -337,7 +325,7 @@ dry_run = false
 
 ---
 
-## 5.4 実行コマンド早見表
+## 5.3 実行コマンド早見表
 
 前提:
 

@@ -35,7 +35,6 @@ SensorManager = sns_mgr_under_test.SensorManager
 class _LogOnlyController(SensorManager):
     def __init__(self):
         self.st = CanSatState()
-        self.machine_name = "test"
         self.target_lat = 0.0
         self.target_lng = 0.0
         self.mission_start_time = 100.0

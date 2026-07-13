@@ -129,14 +129,12 @@ class MissionConfigTest(unittest.TestCase):
             with self.assertRaisesRegex(MissionConfigError, "Python 3.11 or newer"):
                 mission_config.load_mission_config(self._write_config(VALID_CONFIG))
 
-    def test_invalid_config_stops_before_runtime_activation(self):
+    def test_invalid_config_stops_before_controller_import(self):
         import mission.run as mission_run
 
         with patch.object(mission_run, "load_mission_config", side_effect=MissionConfigError("invalid")):
-            with patch.object(mission_run, "_activate_runtime") as activate_runtime:
-                with self.assertRaisesRegex(MissionConfigError, "invalid"):
-                    mission_run._build_controller()
-        activate_runtime.assert_not_called()
+            with self.assertRaisesRegex(MissionConfigError, "invalid"):
+                mission_run._build_controller()
 
     def test_runtime_passes_file_config_to_controller(self):
         import mission.run as mission_run
@@ -145,20 +143,19 @@ class MissionConfigTest(unittest.TestCase):
         captured = {}
 
         class FakeController:
-            def __init__(self, received_config, machine_name):
+            def __init__(self, received_config, log_dir=None):
                 captured["config"] = received_config
-                captured["machine_name"] = machine_name
+                captured["log_dir"] = log_dir
 
         fake_ctrl_module = types.ModuleType("mission.ctrl")
         fake_ctrl_module.CanSatController = FakeController
         with patch.object(mission_run, "load_mission_config", return_value=config):
-            with patch.object(mission_run, "_activate_runtime", return_value="unit1"):
-                with patch.dict(sys.modules, {"mission.ctrl": fake_ctrl_module}):
-                    controller = mission_run._build_controller()
+            with patch.dict(sys.modules, {"mission.ctrl": fake_ctrl_module}):
+                controller = mission_run._build_controller(log_dir="/tmp/cansat-test")
 
         self.assertIsInstance(controller, FakeController)
         self.assertIs(captured["config"], config)
-        self.assertEqual(captured["machine_name"], "unit1")
+        self.assertEqual(captured["log_dir"], "/tmp/cansat-test")
 
     def test_target_constants_were_removed(self):
         from mission import const

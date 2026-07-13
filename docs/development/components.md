@@ -27,9 +27,9 @@
 
 ### 出力先の分離
 
-- `log.py` の出力は `analysis/outputs/<machine>/<log名>/run_.../` に置く
-- `explorer.py` の出力は `analysis/explorer_outputs/<machine>/<log名>/run_.../` に置く
-- 各出力には `analysis_context.txt` を置き、機体名と入力ログを明示する
+- `log.py` の出力は `analysis/outputs/<log名>/run_.../` に置く
+- `explorer.py` の出力は `analysis/explorer_outputs/<log名>/run_.../` に置く
+- 各出力には `analysis_context.txt` を置き、入力ログを明示する
 - 解析目的が違うため、ファイル名やディレクトリを共通化しない
 - ただし、同じログ列の読み方や品質判定は可能な限り共有し、解釈のズレを減らす
 

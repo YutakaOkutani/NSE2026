@@ -72,21 +72,20 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
                 return candidate, candidate_stem
             suffix += 1
 
-    def __init__(self, mission_config, machine_name="common"):
+    def __init__(self, mission_config, log_dir=None):
         self.st = CanSatState()
-        self.machine_name = str(machine_name)
         self.mission_config = mission_config
         self.target_lat = mission_config.target.latitude
         self.target_lng = mission_config.target.longitude
         self.radio_config = mission_config.radio
         self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
 
-        # ログCSVは親ディレクトリ直下へ実行単位のファイル名で保存する。
-        # 機体別の親ディレクトリは profile 側で決める。
+        # ログCSVは用途別ディレクトリ直下へ実行単位のファイル名で保存する。
+        resolved_log_dir = str(log_dir) if log_dir is not None else LOG_DIR
         now_time = datetime.datetime.now()
-        os.makedirs(LOG_DIR, exist_ok=True)
-        self.log_path, self.run_stem = self._build_unique_log_path(LOG_DIR, now_time)
-        self.run_dir = LOG_DIR
+        os.makedirs(resolved_log_dir, exist_ok=True)
+        self.log_path, self.run_stem = self._build_unique_log_path(resolved_log_dir, now_time)
+        self.run_dir = resolved_log_dir
         self.capture_reached_path = os.path.join(self.run_dir, self.run_stem + "_capture_reached.png")
 
         self.devices = {key: None for key in DEVICE_KEYS}

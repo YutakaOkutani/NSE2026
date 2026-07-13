@@ -47,4 +47,4 @@ python3 runs/cam/relay_sbc.py
   - Increase `--video-every` (send frames less often).
   - Lower `--jpeg-quality`.
   - Lower `--tx-hz`.
-- Required packages (both machines as needed): `opencv-python`, `numpy`, `matplotlib`, `pynmea2`, `pyserial`.
+- Required packages (SBC and PC as needed): `opencv-python`, `numpy`, `matplotlib`, `pynmea2`, `pyserial`.

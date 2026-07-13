@@ -15,7 +15,7 @@ class Phase(IntEnum):
     PHASE7 = 7
 
 # ログ関連定数
-LOG_DIR = "/home/pi/logs_nse2026/common"
+LOG_DIR = "/home/pi/logs_nse2026/mission"
 LOG_PREFIX = "robust_log_"
 LOG_FILE_DATETIME_FORMAT = "%Y-%m%d-%H%M%S"
 
@@ -237,13 +237,12 @@ MOTOR_LOOP_INTERVAL = 0.05
 MOTOR_IDLE_SLEEP = 0.1
 MOTOR_RAMP_TIME = 0.6
 MOTOR_RAMP_STEP = 0.05
-# 回転方向の反転はモーター配線の取り回しに依存するため、
-# 実機では mission.profile の機体別設定で上書きする。
+# 現行機体のモーター配線・個体差に合わせた固定値。
 MOTOR_DIR_INVERT_1 = False
-MOTOR_DIR_INVERT_2 = False
+MOTOR_DIR_INVERT_2 = True
 MANUAL_TURN_SPEED_RATIO = 3.0 / 5.0
 # モーター個体差補正 (PWM指令値に乗算)
-MOTOR_SPEED_SCALE_1 = 1.00
+MOTOR_SPEED_SCALE_1 = 0.95
 MOTOR_SPEED_SCALE_2 = 1.00
 # モーター個体差補正 (PWM指令値に加算, scale適用後)
 # 例: MTR1がまだ速いなら MOTOR_SPEED_OFFSET_1 = -2.0 のように下げる
@@ -452,7 +451,6 @@ PHASES_CAMERA_ACTIVE = (Phase.PHASE4, Phase.PHASE5)
 
 # ログのヘッダー
 LOG_HEADER = [
-    "Machine",
     "ElapsedSec",
     "Phase",
     "Phase0ExitReason",

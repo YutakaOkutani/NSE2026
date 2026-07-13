@@ -3,12 +3,11 @@ from mission.const import Phase
 from mission.run import run_phase_sequence
 
 
-def run_phase0_logging(log_subdir: str, machine_name: str = "common") -> None:
+def run_phase0_logging(log_subdir: str) -> None:
     log_dir = TEST_LOG_ROOT / log_subdir
     run_phase_sequence(
         start_phase=Phase.PHASE0,
         allowed_phases=(Phase.PHASE0,),
-        machine_name=machine_name,
         log_dir=str(log_dir),
     )
 

@@ -12,7 +12,6 @@ __pycache__/
 /runs/log/
 /log/
 /runs/telemetry/logs/
-/machine.txt
 /mission.toml
 
 # Virtual environment

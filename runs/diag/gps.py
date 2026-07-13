@@ -10,9 +10,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from mission.profile import activate_machine_profile, list_profiles
-
-
 UPDATE_INTERVAL_SECONDS = 5
 
 
@@ -70,7 +67,6 @@ def read_raw_nmea(duration_seconds=10.0):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="GPS startup diagnostic tool")
-    parser.add_argument("--machine", default=None, choices=list_profiles())
     parser.add_argument("--raw-probe-seconds", type=float, default=10.0)
     parser.add_argument("--skip-raw-probe", action="store_true")
     parser.add_argument("--update-interval", type=float, default=UPDATE_INTERVAL_SECONDS)
@@ -79,8 +75,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    # 診断系も本番入口と同じ機体判別を使い、補正値の当たり違いを避ける。
-    activate_machine_profile(args.machine)
     from mission.gps_util import RobustGPSReader
 
     update_interval = max(0.5, float(args.update_interval))

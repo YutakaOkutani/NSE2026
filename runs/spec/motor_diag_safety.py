@@ -17,14 +17,21 @@ spec.loader.exec_module(motor_diag)
 
 
 class MotorDiagnosticSafetyTest(unittest.TestCase):
+    def test_production_motor_direction_matches_current_airframe(self):
+        self.assertEqual(motor_diag.motor_forward_to_dir_value(1, True), 1)
+        self.assertEqual(motor_diag.motor_forward_to_dir_value(2, True), 0)
+
+    def test_production_motor_trim_matches_current_airframe(self):
+        self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_1, 0.95)
+        self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_2, 1.00)
+
     def test_quit_always_stops_motors(self):
-        args = types.SimpleNamespace(machine=None, default_speed=50.0)
+        args = types.SimpleNamespace(default_speed=50.0)
         with patch.object(motor_diag, "parse_args", return_value=args):
-            with patch.object(motor_diag, "activate_machine_profile"):
-                with patch.object(motor_diag, "setup"):
-                    with patch.object(motor_diag, "_get_command", return_value="q"):
-                        with patch.object(motor_diag, "stop") as stop:
-                            motor_diag.main()
+            with patch.object(motor_diag, "setup"):
+                with patch.object(motor_diag, "_get_command", return_value="q"):
+                    with patch.object(motor_diag, "stop") as stop:
+                        motor_diag.main()
         stop.assert_called_once_with()
 
 

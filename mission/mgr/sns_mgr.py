@@ -162,7 +162,6 @@ class SensorManager:
             calib_values = (0, 0, 0, 0)
 
         return [
-            str(getattr(self, "machine_name", "common")),
             f"{mission_elapsed_sec:.2f}",
             self._coerce_int(current_data.get("phase", 0)),
             str(getattr(self, "phase0_exit_reason", "")),

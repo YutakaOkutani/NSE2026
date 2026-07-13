@@ -10,30 +10,19 @@ if not MAIN_PY_LIBRARY_DIR.exists():
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mission.profile import build_debug_log_dir, list_profiles, resolve_machine_profile
-
-
 def build_phase_runner_parser(description: str, default_label: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--machine", default=None, choices=list_profiles())
-    parser.add_argument("--debug-scope", default="machine", choices=("machine", "shared"))
     parser.add_argument("--debug-label", default=default_label)
     parser.add_argument("--log-dir", default=None)
     return parser
 
 
 def resolve_runtime_args(args):
-    resolution = resolve_machine_profile(args.machine)
     if args.log_dir:
         log_dir = str(Path(args.log_dir))
     else:
-        log_dir = build_debug_log_dir(
-            base_root=TEST_LOG_ROOT,
-            profile_name=resolution.name,
-            scope=args.debug_scope,
-            label=args.debug_label,
-        )
+        safe_label = str(args.debug_label or "debug").strip().replace(" ", "_")
+        log_dir = str(TEST_LOG_ROOT / "debug" / safe_label)
     return {
-        "machine_name": resolution.name,
         "log_dir": log_dir,
     }

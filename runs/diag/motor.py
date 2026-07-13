@@ -21,7 +21,6 @@ from mission.const import (
     PWM_FREQ,
 )
 from mission.motor_map import get_manual_drive_pattern, motor_forward_to_dir_value
-from mission.profile import activate_machine_profile, list_profiles
 
 DEFAULT_SPEED = 100  # Default duty for manual control (0-100)
 SPEED_STEP = 5  # Duty adjustment step for interactive test (0-100)
@@ -314,15 +313,12 @@ def _clamp_speed(speed):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Interactive motor diagnostic")
-    parser.add_argument("--machine", default=None, choices=list_profiles())
     parser.add_argument("--default-speed", type=float, default=DEFAULT_SPEED)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    # モータ補正は安全に直結するため、本番と同じプロファイル適用経路を通す。
-    activate_machine_profile(args.machine, extra_modules=[sys.modules[__name__]])
     current_speed = float(args.default_speed)
     try:
         setup()
