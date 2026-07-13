@@ -33,8 +33,6 @@ from mission.const import (
     DEVICE_MOTOR_2_PWM,
     DEVICE_SONAR,
     GPS_HEADING_OFFSET,
-    TARGET_LAT,
-    TARGET_LNG,
     HEADING_MAG_CALIB_MAX,
     HEADING_SOURCE_BNO,
     HEADING_SOURCE_GPS,
@@ -47,6 +45,7 @@ from mission.const import (
     HEADING_WEIGHT_GPS,
     Phase,
 )
+from mission.config import load_mission_config
 from mission.mgr import HardwareManager, LedManager, MotorManager, SensorManager
 from mission.phases import Phase4Handler, Phase5Handler, Phase6Handler, Phase7Handler
 from mission.st import CanSatState
@@ -67,10 +66,10 @@ DEFAULT_START_PHASE = 4
 
 
 class RelayController(HardwareManager, MotorManager, SensorManager, LedManager):
-    def __init__(self, args):
+    def __init__(self, args, mission_config):
         self.args = args
-        self.target_lat = float(getattr(args, "target_lat", TARGET_LAT))
-        self.target_lng = float(getattr(args, "target_lng", TARGET_LNG))
+        self.target_lat = mission_config.target.latitude
+        self.target_lng = mission_config.target.longitude
         self.st = CanSatState()
         self.st.update_navigation(phase=int(args.start_phase))
         self.phase_entry_time = time.time()
@@ -531,8 +530,6 @@ def parse_args():
     parser.add_argument("--start-phase", type=int, default=DEFAULT_START_PHASE, choices=[4, 5, 6, 7])
     parser.add_argument("--exit-on-goal", action="store_true")
     parser.add_argument("--p6-hold-sec", type=float, default=5.0)
-    parser.add_argument("--target-lat", type=float, default=TARGET_LAT)
-    parser.add_argument("--target-lng", type=float, default=TARGET_LNG)
     parser.add_argument("--preview-rotate-180", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--preview-swap-rb", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--camera-control-invert-x", action=argparse.BooleanOptionalAction, default=False)
@@ -541,11 +538,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+    mission_config = load_mission_config()
     args.jpeg_quality = max(1, min(95, args.jpeg_quality))
     args.tx_hz = max(1.0, args.tx_hz)
     args.video_every = max(1, args.video_every)
     args.phase6_hold_sec = max(0.0, float(args.phase6_hold_sec))
-    controller = RelayController(args)
+    controller = RelayController(args, mission_config)
 
     def _handle_signal(signum, _frame):
         try:

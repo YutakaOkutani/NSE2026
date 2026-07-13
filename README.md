@@ -298,11 +298,38 @@ cp machine.txt.example machine.txt
 nano machine.txt
 ```
 
-`machine.txt` がない場合、引数なし実行は `common` 扱いになる。`--machine unit1` のように明示指定した場合は、`machine.txt` より引数が優先される。
+`machine.txt` がない場合、`main.py` は機体固有補正を含まない `common` 扱いになる。本番入口では機体名を引数や環境変数で上書きしない。
+
+## 5.2 ミッション設定ファイルの作成
+
+各 Raspberry Pi で、リポジトリ直下に `mission.toml` を作成し、その日のゴール座標と無線設定を記入する。このファイルはGit管理外なので、座標変更のコミットは不要。
+
+```bash
+cd ~/NSE2026
+cp mission.toml.example mission.toml
+nano mission.toml
+```
+
+```toml
+[target]
+latitude = 38.260728
+longitude = 140.854073
+
+[radio]
+control = "off"
+pre_off_delay_sec = 3
+restore_timeout_sec = 180
+use_sudo = true
+dry_run = false
+```
+
+`main.py` は座標を引数、環境変数、`mission/const.py` から取得しない。`mission.toml` がない、必須項目がない、型や範囲が不正、未知の項目がある場合は、ハードウェアを初期化せず終了する。起動前に必ず採用座標を確認する。
+
+`mission.toml.example`の座標は意図的に範囲外にしてあり、コピーしただけでは起動できない。実機ではPython 3.11以降を使用する。
 
 ---
 
-## 5.2 ドキュメント
+## 5.3 ドキュメント
 
 セットアップと基本コマンドはこの `README.md`、設計・開発方針・運用手順は [`docs/index.md`](docs/index.md) を入口として参照する。
 
@@ -310,7 +337,7 @@ nano machine.txt
 
 ---
 
-## 5.3 実行コマンド早見表
+## 5.4 実行コマンド早見表
 
 前提:
 
@@ -326,6 +353,7 @@ python3 runs/orch/p0_p1.py
 
 # 各種テストコード
 python3 runs/diag/sensor.py
+python3 runs/diag/sonar.py
 python3 runs/diag/gps.py
 python3 runs/diag/motor.py
 python3 runs/diag/led.py
@@ -343,6 +371,8 @@ python3 runs/cam/detect_dbg.py --phase 4
 # ログ解析（PC上で実行）
 python3 analysis/log.py
 ```
+
+超音波センサだけを確認する場合は `python3 runs/diag/sonar.py` を実行し、対象物を前後に動かして `VALID` の距離が追従することを確認する。`HOLD` は一時的な読取失敗、`STALE` は最終正常値から1秒以上更新されていない状態を示す。10秒で自動終了する場合は `--duration 10` を付ける。ECHO出力はGPIOへ直結せず、必ず3.3 Vへレベル変換する。
 
 ---
 
@@ -526,7 +556,7 @@ WantedBy=multi-user.target
 * `venv` を使う場合、`source venv/bin/activate` は不要。`ExecStart` に venv の Python を直接書くのが `systemd` の定石
 * `Restart=on-failure` はクラッシュ時に再起動し、`sudo systemctl stop cansat.service` のような手動停止時は再起動しないので運用しやすい
 * 通信を使わない構成なら `network-online.target` は必須ではないが、将来の通知機能などを考えると入れておく方が無難
-* `main.py` はリポジトリ直下の `mission.env` を自動で読む。Wi-Fi 停止/復帰の切り替えと試験方法は [`docs/operations/radio_control.md`](docs/operations/radio_control.md) を参照する
+* `main.py` はリポジトリ直下の `mission.toml` を必須設定として読む。Wi-Fi 停止/復帰の切り替えと試験方法は [`docs/operations/radio_control.md`](docs/operations/radio_control.md) を参照する
 * 通常ユーザー実行のまま Wi-Fi を切る場合は、`rfkill` だけ passwordless sudo を許可する。手順は同文書の「rfkill の passwordless sudo 設定」を参照する
 
 #### 4. `cansat.timer` の作成（起動から5分後に開始する）（任意）

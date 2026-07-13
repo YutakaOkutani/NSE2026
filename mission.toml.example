@@ -1,0 +1,15 @@
+# Copy this file to mission.toml on each Raspberry Pi and edit it there.
+# mission.toml is intentionally ignored by Git.
+
+[target]
+# Deliberately invalid placeholders: mission startup fails until both are edited.
+latitude = 999.0
+longitude = 999.0
+
+[radio]
+# "mission" disables Wi-Fi during Phase0; "off" leaves Wi-Fi enabled.
+control = "off"
+pre_off_delay_sec = 3
+restore_timeout_sec = 180
+use_sudo = true
+dry_run = false

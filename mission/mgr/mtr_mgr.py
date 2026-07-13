@@ -406,6 +406,7 @@ class MotorManager:
 
             obstacle_detected = (
                 phase not in PHASES_SKIP_OBSTACLE
+                and bool(snapshot.get("obstacle_valid", False))
                 and obstacle_dist is not None
                 and 0 < obstacle_dist < OBSTACLE_AVOID_DIST
             )

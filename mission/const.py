@@ -19,10 +19,6 @@ LOG_DIR = "/home/pi/logs_nse2026/common"
 LOG_PREFIX = "robust_log_"
 LOG_FILE_DATETIME_FORMAT = "%Y-%m%d-%H%M%S"
 
-# ターゲット座標
-TARGET_LAT = 38.260728
-TARGET_LNG = 140.854073
-
 # タイムアウトと動作関連定数
 TIMEOUT_PHASE_0 = 2 * 60
 TIMEOUT_PHASE_1 = 30
@@ -265,17 +261,6 @@ LED_SIGNAL_COUNT = 3
 LED_TIMEOUT_ALERT_FLASH_COUNT = 24
 LED_TIMEOUT_ALERT_FAST_SLEEP = 0.08
 
-# Radio control for launch-day drone interference prevention.
-# Disabled by default. Enable only from the systemd mission environment.
-RADIO_CONTROL_ENV_KEY = "CANSAT_RADIO_CONTROL"
-RADIO_CONTROL_MISSION_VALUE = "mission"
-RADIO_MISSION_ENV_PATH_ENV_KEY = "CANSAT_MISSION_ENV_PATH"
-RADIO_RESTORE_TIMEOUT_ENV_KEY = "CANSAT_RADIO_RESTORE_TIMEOUT_SEC"
-RADIO_PRE_OFF_DELAY_ENV_KEY = "CANSAT_RADIO_PRE_OFF_DELAY_SEC"
-RADIO_USE_SUDO_ENV_KEY = "CANSAT_RADIO_USE_SUDO"
-RADIO_DRY_RUN_ENV_KEY = "CANSAT_RADIO_DRY_RUN"
-RADIO_RESTORE_TIMEOUT_SEC = TIMEOUT_PHASE_0
-RADIO_PRE_OFF_DELAY_SEC = 3.0
 RADIO_COMMAND_TIMEOUT_SEC = 10.0
 
 # モーター・センサーのGPIO関連定数
@@ -290,6 +275,8 @@ PIN_LED_GREEN = 5
 PIN_TRIG = 23
 PIN_ECHO = 24
 SONAR_MAX_DISTANCE = 4.0
+# 5 sampling periods (DATA_SAMPLING_RATE=0.2s). Older readings are not used for avoidance.
+SONAR_STALE_TIMEOUT_SEC = 1.0
 
 # GPS関連定数
 GPS_SERIAL_PORT = "/dev/serial0"
@@ -532,6 +519,8 @@ LOG_HEADER = [
     "ConeProb",
     "ConeMethod",
     "ObstacleDist",
+    "SonarValid",
+    "SonarStaleSec",
     "AngleValid",
     "BNOStaleSec",
     "BNORecoveryActive",

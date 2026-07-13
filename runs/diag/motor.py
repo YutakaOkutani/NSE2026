@@ -380,6 +380,7 @@ def main():
 
     except KeyboardInterrupt:
         print("\nExiting...")
+    finally:
         stop()
 
 

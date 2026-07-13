@@ -19,8 +19,6 @@ def build_phase_runner_parser(description: str, default_label: str) -> argparse.
     parser.add_argument("--debug-scope", default="machine", choices=("machine", "shared"))
     parser.add_argument("--debug-label", default=default_label)
     parser.add_argument("--log-dir", default=None)
-    parser.add_argument("--target-lat", type=float, default=None)
-    parser.add_argument("--target-lng", type=float, default=None)
     return parser
 
 
@@ -37,7 +35,5 @@ def resolve_runtime_args(args):
         )
     return {
         "machine_name": resolution.name,
-        "target_lat": args.target_lat,
-        "target_lng": args.target_lng,
         "log_dir": log_dir,
     }

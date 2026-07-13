@@ -40,6 +40,7 @@ from mission.const import (
     CONE_CENTER_POSITION,
     DATA_SAMPLING_RATE,
     DEFAULT_BNO_CALIB,
+    DEFAULT_OBSTACLE_DIST_CM,
     DEVICE_BMP,
     DEVICE_BNO,
     DEVICE_DETECTOR,
@@ -64,6 +65,7 @@ from mission.const import (
     GPS_STABLE_FIX_COUNT,
     PHASES_CAMERA_ACTIVE,
     SONAR_MAX_DISTANCE,
+    SONAR_STALE_TIMEOUT_SEC,
 )
 from mission.gps_util import coerce_gga_metrics, gga_quality_ok, open_gps_serial, parse_gga_sentence
 from mission.nav import calc_distance_and_azimuth
@@ -227,6 +229,8 @@ class SensorManager:
             f"{self._coerce_float(current_data.get('cone_probability', 0.0)):.2f}",
             str(current_data.get("cone_method", "")),
             f"{self._coerce_float(current_data.get('obstacle_dist', 0.0)):.2f}",
+            self._coerce_int(bool(current_data.get("obstacle_valid", False))),
+            f"{self._coerce_float(current_data.get('obstacle_stale_sec', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("angle_valid", False))),
             f"{bno_stale_sec:.2f}",
             self._coerce_int(bool(getattr(self, "bno_heading_recovery_active", False))),
@@ -683,6 +687,39 @@ class SensorManager:
             pass
         return None
 
+    def _update_sonar_state(self, sonar_dist, now=None):
+        now = time.monotonic() if now is None else float(now)
+        try:
+            distance_cm = float(sonar_dist)
+        except (TypeError, ValueError):
+            distance_cm = None
+        valid_sample = (
+            distance_cm is not None
+            and math.isfinite(distance_cm)
+            and 0.0 < distance_cm < float(SONAR_MAX_DISTANCE) * 100.0
+        )
+        if valid_sample:
+            self.sonar_last_valid_monotonic = now
+            self.st.update_obstacle(
+                obstacle_dist=distance_cm,
+                obstacle_valid=True,
+                obstacle_stale_sec=0.0,
+            )
+            return True
+
+        last_valid_raw = getattr(self, "sonar_last_valid_monotonic", None)
+        last_valid = float(last_valid_raw) if last_valid_raw is not None else None
+        stale_sec = max(0.0, now - last_valid) if last_valid is not None else SONAR_STALE_TIMEOUT_SEC + 1.0
+        if last_valid is None or stale_sec >= float(SONAR_STALE_TIMEOUT_SEC):
+            self.st.update_obstacle(
+                obstacle_dist=DEFAULT_OBSTACLE_DIST_CM,
+                obstacle_valid=False,
+                obstacle_stale_sec=stale_sec,
+            )
+        else:
+            self.st.update_obstacle(obstacle_stale_sec=stale_sec)
+        return False
+
     def cone_detect(self):
         detector = self.devices.get(DEVICE_DETECTOR)
         if detector is None:
@@ -1061,8 +1098,7 @@ class SensorManager:
                 print(f"Sonar Thread Slice Error: {exc}")
                 traceback.print_exc()
                 sonar_dist = None
-            if sonar_dist is not None:
-                self.st.update_obstacle(obstacle_dist=sonar_dist)
+            self._update_sonar_state(sonar_dist)
             time.sleep(DATA_SAMPLING_RATE)
 
     def data_thread(self):

@@ -81,6 +81,21 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["BNOAccUpdatedElapsedSec"], "1.25")
         self.assertEqual(by_name["BMPUpdatedElapsedSec"], "2.50")
 
+    def test_sonar_freshness_columns_are_written_to_log_row(self):
+        ctrl = _LogOnlyController()
+        ctrl.st.update_obstacle(
+            obstacle_dist=24.5,
+            obstacle_valid=True,
+            obstacle_stale_sec=0.4,
+        )
+
+        row = ctrl._build_log_row()
+        by_name = dict(zip(LOG_HEADER, row))
+
+        self.assertEqual(by_name["ObstacleDist"], "24.50")
+        self.assertEqual(by_name["SonarValid"], 1)
+        self.assertEqual(by_name["SonarStaleSec"], "0.40")
+
     def test_phase0_exit_columns_are_written_to_log_row(self):
         ctrl = _LogOnlyController()
         ctrl.phase0_exit_reason = "impact"

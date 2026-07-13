@@ -11,9 +11,7 @@
 
 | 実行入口 | 主な出力 | 既定の保存先 |
 | --- | --- | --- |
-| `python3 main.py --machine common` | ミッションCSV + 到達時PNG | `log/common/<run_id>/` |
-| `python3 main.py --machine unit1` | ミッションCSV + 到達時PNG | `log/unit1/<run_id>/` |
-| `python3 main.py --machine unit2` | ミッションCSV + 到達時PNG | `log/unit2/<run_id>/` |
+| `python3 main.py` | ミッションCSV + 到達時PNG | 機体プロファイルの`LOG_DIR` |
 | `runs/orch/*.py` | ミッションCSV + 到達時PNG | `runs/log/by_machine/<machine>/<label>/<run_id>/` |
 | `runs/orch/*.py --debug-scope shared` | ミッションCSV + 到達時PNG | `runs/log/shared/<label>/<machine>/<run_id>/` |
 | `lib/roi_capture.py` | ROI参照PNG + 最新ROI | `/home/pi/logs_nse2026/roi/` |
@@ -21,6 +19,7 @@
 | `runs/cam/capture.py` | 撮影JPEG群 | `/home/pi/logs_nse2026/capture_<timestamp>[_session]/` |
 | `runs/diag/gps.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/sensor.py` | 端末出力のみ | 保存ファイルなし |
+| `runs/diag/sonar.py` | 超音波距離・有効性・stale状態 | 保存ファイルなし |
 | `runs/diag/motor.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/diag/led.py` | 端末出力のみ | 保存ファイルなし |
 | `runs/cam/relay_sbc.py` | 端末出力 + 通信 | 保存ファイルなし |
@@ -29,7 +28,7 @@
 
 - `<run_id>` は `robust_log_YYYY-mmdd-HHMMSS-uuuuuu` 形式の実行ごとサブフォルダ。
 - `main.py` 系と `runs/orch` 系では、CSV と `capture_reached.png` が同じ `<run_id>/` 配下に入る。
-- `main.py` / `runs/orch` は `--log-dir` 指定時、そのパスを「実行一覧の親フォルダ」として使う。
+- `runs/orch` は `--log-dir` 指定時、そのパスを「実行一覧の親フォルダ」として使う。本番の`main.py`は設定上書き引数を持たない。
 
 ## ファイル構成
 
@@ -37,7 +36,7 @@
 ├── README.md                          # セットアップ手順と基本実行コマンド
 ├── main.py                            # 本番ミッションの入口
 ├── .gitignore                         # Git除外設定
-├── mission.env.example                # ミッション環境変数のサンプル
+├── mission.toml.example               # 実機ミッション設定のサンプル
 ├── machine.txt.example                # 機体識別ファイルのサンプル
 ├── docs/                              # 設計・運用ドキュメント
 │   ├── index.md                       # ドキュメント入口
@@ -173,13 +172,13 @@
 
 判別順序:
 
-1. `--machine` などコードから渡された明示指定
+1. 診断・フェーズ試験からコードで渡された明示指定
 2. リポジトリ直下の `machine.txt`
 3. 判別不能時の `common`
 
 明示指定または `machine.txt` に未知の機体名が入っていた場合は `ValueError` とし、誤った補正値で走らせない。どちらもない場合だけ、機体固有補正を含まない `common` をフォールバックにする。
 
-ログ分離は既存のまま維持する。`main.py` は `log/<machine>/`、`runs/orch/` は `runs/log/by_machine/<machine>/<label>/` または `runs/log/shared/<label>/<machine>/` を使う。
+本番の`main.py`は明示指定を渡さず、`machine.txt`を使用する。診断・フェーズ試験では対象機を明示するため`--machine`を利用できる。
 
 ## コメント追加方針
 
@@ -192,7 +191,7 @@
 
 - 長い実行ファイル名を短縮し、参照ドキュメントと import を追従した。
 - `mission/profile.py` に機体判別処理を追加し、判別結果を本番・オーケストレーション・GPS診断・モータ診断で共通利用するようにした。
-- `--machine` は明示上書きとして維持し、指定がない場合は `machine.txt` を読む動作へ変更した。
+- 本番の機体指定は`machine.txt`へ一本化し、診断・フェーズ試験の`--machine`だけを維持した。
 - 判別不能時のフォールバックと、未知の明示指定をエラーにする条件を明文化した。
 - 機体判別と安全上重要なプロファイル適用箇所にコメントを追加した。
 
@@ -277,8 +276,7 @@
 ## 実行入口
 
 - 本番実行
-  - `python3 main.py --machine unit1`
-  - `python3 main.py --machine unit2`
+  - `python3 main.py`
 - フェーズ限定試験
   - `python3 runs/orch/p1_p3.py --machine unit1`
   - `python3 runs/orch/p3_p4.py --machine unit2 --debug-scope shared`
@@ -288,13 +286,13 @@
 
 ## 本番実行と systemd
 
-`main.py` は標準入力を前提にせず、引数だけで起動できるため、systemd 自動起動に向いた入口になっている。
+`main.py` は標準入力や設定上書き引数を前提にしないため、systemd 自動起動に向いた入口になっている。
 
 - 本番入口は `python3 main.py` だけで完結する。
-- 機体切替は `--machine` を最優先し、指定がなければリポジトリ直下の `machine.txt` を読む。
-- `machine.txt` に `unit1` または `unit2` と書くと、引数なしでも機体を固定できる。
-- 目標座標は `--target-lat` / `--target-lng`、または `CANSAT_TARGET_LAT` / `CANSAT_TARGET_LNG` で上書きできる。
-- ログ出力先は `--log-dir`、または `CANSAT_LOG_DIR` で上書きできる。
+- 機体はリポジトリ直下の `machine.txt` で固定する。
+- 目標座標と無線設定はGit管理外の `mission.toml` だけから読む。
+- `mission.toml` がない、または不正な場合はハードウェア初期化前に終了する。
+- 本番入口では引数やプロセス環境変数による設定上書きを行わない。
 - `mission/profile.py` の既定 `LOG_DIR` はリポジトリ基準の絶対パスになるため、systemd の `WorkingDirectory` に過度に依存しない。
 
 systemd 運用で意識する点:
@@ -314,13 +312,10 @@ systemd 運用で意識する点:
 [Service]
 WorkingDirectory=/home/pi/NSE2026
 ExecStart=/home/pi/NSE2026/venv/bin/python3 /home/pi/NSE2026/main.py
-Environment=CANSAT_TARGET_LAT=30.374217
-Environment=CANSAT_TARGET_LNG=130.959968
-Environment=CANSAT_LOG_DIR=/home/pi/NSE2026/log/unit1
 Restart=on-failure
 ```
 
-機体名は `machine.txt` で固定し、systemd 側には試験日ごとに変わる値だけを置く。
+機体名は `machine.txt`、試験日ごとに変わる値は `mission.toml` に置き、systemdには重複する設定を置かない。
 
 ## 固有値の管理場所と変更方法
 
@@ -332,26 +327,18 @@ Restart=on-failure
 - 全機体で共通の既定値
   - `mission/const.py`
   - まだ機体差分が不要な値はここに置く。
-- 起動時だけ一時的に上書きしたい値
-  - `main.py` の引数、または環境変数で上書きする。
+- ミッションごとに変わる値
+  - Git管理外の `mission.toml` に置く。
 
-優先順位は次の通り。
-
-1. `main.py` の起動引数
-2. 環境変数
-3. `mission/profile.py` の機体既定値
-4. `mission/const.py` の共通既定値
-
-機体名そのものの判別優先順位は「明示引数、`machine.txt`, `common`」である。リポジトリ直下の `machine.txt` はローカル設定として使い、Git には含めない。
+本番の機体名は`machine.txt`、目標座標と無線設定は`mission.toml`を唯一の設定元とする。フェーズ試験や診断コマンドには試験動作を選ぶ引数があるが、本番設定の上書きには使わない。
 
 代表例:
 
 - 目標座標
-  - 共通の既定値: `mission/const.py` の `TARGET_LAT`, `TARGET_LNG`
-  - 一時変更: `--target-lat`, `--target-lng` または `CANSAT_TARGET_LAT`, `CANSAT_TARGET_LNG`
+  - `mission.toml` の `target.latitude`, `target.longitude`
 - ログ保存先
   - 機体ごとの既定値: `mission/profile.py` の `LOG_DIR`
-  - 一時変更: `--log-dir` または `CANSAT_LOG_DIR`
+  - フェーズ試験のみ: `runs/orch` の `--log-dir`
 - モータ補正値
   - 機体ごとの既定値: `mission/profile.py` の `MOTOR_SPEED_SCALE_1`, `MOTOR_SPEED_SCALE_2`, `MOTOR_SPEED_OFFSET_1`, `MOTOR_SPEED_OFFSET_2`
   - 一時変更: 原則 `mission/profile.py` を編集して管理する

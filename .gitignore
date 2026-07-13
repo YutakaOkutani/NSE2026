@@ -13,6 +13,7 @@ __pycache__/
 /log/
 /runs/telemetry/logs/
 /machine.txt
+/mission.toml
 
 # Virtual environment
 /venv

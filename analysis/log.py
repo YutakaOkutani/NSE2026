@@ -121,7 +121,7 @@ COLUMN_GROUPS = [
     {
         "key": "vision_detection",
         "title": "Vision / Detection",
-        "cols": ["ConeDir", "ConeProb", "ConeMethod", "ObstacleDist"],
+        "cols": ["ConeDir", "ConeProb", "ConeMethod", "ObstacleDist", "SonarValid", "SonarStaleSec"],
     },
     {
         "key": "fall_and_sensor_health",

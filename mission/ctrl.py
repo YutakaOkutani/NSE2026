@@ -72,11 +72,13 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
                 return candidate, candidate_stem
             suffix += 1
 
-    def __init__(self, target_lat, target_lng, machine_name="common"):
+    def __init__(self, mission_config, machine_name="common"):
         self.st = CanSatState()
         self.machine_name = str(machine_name)
-        self.target_lat = target_lat
-        self.target_lng = target_lng
+        self.mission_config = mission_config
+        self.target_lat = mission_config.target.latitude
+        self.target_lng = mission_config.target.longitude
+        self.radio_config = mission_config.radio
         self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
 
         # ログCSVは親ディレクトリ直下へ実行単位のファイル名で保存する。
@@ -204,10 +206,11 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self._shutdown_requested = False
         self.radio_control_mode = ""
         self.radio_disabled = False
+        self.radio_simulated_disabled = False
         self.radio_disable_time = None
         self.radio_restore_deadline = None
         self.radio_last_event = "not_configured"
-        self.radio_config_source = "not_loaded"
+        self.radio_config_source = str(mission_config.source)
 
         self.phase_handlers = {
             Phase.PHASE0: Phase0Handler(),
@@ -351,14 +354,14 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         return True
 
     def run(self, start_phase=Phase.PHASE0, allowed_phases=None):
-        self.setup_hardware()
-        self.signal_led(LED_SIGNAL_COUNT)
-        self.prepare_mission_radio_control(start_phase)
-        self.initialize_phase(start_phase)
-        allowed_set = None
-        if allowed_phases is not None:
-            allowed_set = {Phase(value) for value in allowed_phases}
         try:
+            self.setup_hardware()
+            self.signal_led(LED_SIGNAL_COUNT)
+            self.prepare_mission_radio_control(start_phase)
+            self.initialize_phase(start_phase)
+            allowed_set = None
+            if allowed_phases is not None:
+                allowed_set = {Phase(value) for value in allowed_phases}
             while not self._shutdown_requested:
                 if allowed_set is not None:
                     # デバッグ実行では許可フェーズを抜けた時点で正常終了扱いにする。

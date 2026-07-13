@@ -48,7 +48,7 @@
 
 - `LAT` / `LNG` からローカル座標系へ変換した走行経路
 - `ALT` による相対高度・地形プロファイル
-- `ObstacleDist` と進行方向から推定した障害物候補点
+- `SonarValid=1` の `ObstacleDist` と進行方向から推定した障害物候補点
 - `ConeDir` / `ConeProb` / `ConeMethod` による目標・物体検出イベント
 - `Phase` と地形・障害物・視覚イベントの位置関係
 - `GPSFixQual` / `GPSSats` / `GPSHdop` による再構成結果の信頼度

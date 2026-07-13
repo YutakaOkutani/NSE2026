@@ -36,14 +36,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 try:
-    from mission.const import GPS_MAX_HDOP, GPS_MIN_FIX_QUAL, GPS_MIN_SATELLITES, LOG_PREFIX, TARGET_LAT, TARGET_LNG
+    from mission.const import GPS_MAX_HDOP, GPS_MIN_FIX_QUAL, GPS_MIN_SATELLITES, LOG_PREFIX
 except Exception:
     GPS_MAX_HDOP = 5.0
     GPS_MIN_FIX_QUAL = 1
     GPS_MIN_SATELLITES = 4
     LOG_PREFIX = "robust_log_"
-    TARGET_LAT = 0.0
-    TARGET_LNG = 0.0
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -160,6 +158,7 @@ def parse_log_start_time(log_path: Path) -> datetime | None:
 
 def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
+    has_sonar_valid = "SonarValid" in result.columns
     numeric_cols = [
         "ElapsedSec",
         "Phase",
@@ -172,6 +171,8 @@ def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "GPSSats",
         "GPSHdop",
         "ObstacleDist",
+        "SonarValid",
+        "SonarStaleSec",
         "Angle",
         "AngleValid",
         "Direction",
@@ -185,6 +186,11 @@ def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     ]
     for col in numeric_cols:
         result[col] = _safe_numeric_series(result, col)
+    result["sonar_valid"] = (
+        result["SonarValid"].fillna(0.0) > 0.0
+        if has_sonar_valid
+        else pd.Series(True, index=result.index)
+    )
 
     result["Phase"] = result["Phase"].round().astype("Int64")
     result["gps_valid"] = (
@@ -225,8 +231,8 @@ def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     target_lat = result["TargetLat"].dropna()
     target_lng = result["TargetLng"].dropna()
     if target_lat.empty or target_lng.empty or float(target_lat.iloc[0]) == 0.0 or float(target_lng.iloc[0]) == 0.0:
-        tgt_lat = TARGET_LAT
-        tgt_lng = TARGET_LNG
+        tgt_lat = float("nan")
+        tgt_lng = float("nan")
     else:
         tgt_lat = float(target_lat.iloc[0])
         tgt_lng = float(target_lng.iloc[0])
@@ -275,8 +281,8 @@ def summarize_mission(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float |
         "phase_end": int(phase_series.iloc[-1]) if not phase_series.empty else -1,
         "max_speed_mps": float(df["GpsSpeedMps"].max()) if df["GpsSpeedMps"].notna().any() else 0.0,
         "best_cone_prob": float(df["ConeProb"].max()) if df["ConeProb"].notna().any() else 0.0,
-        "closest_obstacle_cm": float(df["ObstacleDist"].replace(0, np.nan).min())
-        if df["ObstacleDist"].replace(0, np.nan).notna().any()
+        "closest_obstacle_cm": float(df.loc[df["sonar_valid"], "ObstacleDist"].replace(0, np.nan).min())
+        if df.loc[df["sonar_valid"], "ObstacleDist"].replace(0, np.nan).notna().any()
         else np.nan,
         "mission_end_reason": str(df["MissionEndReason"].dropna().iloc[-1]) if "MissionEndReason" in df.columns and df["MissionEndReason"].dropna().any() else "",
     }
@@ -286,6 +292,7 @@ def summarize_mission(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float |
 def build_obstacle_map(df: pd.DataFrame, obstacle_max_cm: float) -> pd.DataFrame:
     obs = df[
         df["gps_valid"]
+        & df["sonar_valid"]
         & df["heading_deg"].notna()
         & df["ObstacleDist"].notna()
         & (df["ObstacleDist"] > 0)
@@ -338,7 +345,7 @@ def build_event_table(df: pd.DataFrame) -> pd.DataFrame:
                 }
             )
 
-    close_obs = df[df["ObstacleDist"].fillna(np.inf) <= 60.0].copy()
+    close_obs = df[df["sonar_valid"] & (df["ObstacleDist"].fillna(np.inf) <= 60.0)].copy()
     if not close_obs.empty:
         close_obs["obs_bucket"] = (close_obs["ElapsedSec"].fillna(0.0) / 3.0).astype(int)
         close_obs = close_obs.sort_values("ObstacleDist", ascending=True).drop_duplicates("obs_bucket")
@@ -818,6 +825,8 @@ def analyze_explorer_log(
             "ConeDir",
             "ConeProb",
             "ObstacleDist",
+            "SonarValid",
+            "SonarStaleSec",
             "Distance",
             "Azimuth",
             "MissionEndReason",

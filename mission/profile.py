@@ -166,8 +166,6 @@ def activate_machine_profile(
     profile_name: str | None = None,
     *,
     log_dir: str | os.PathLike[str] | None = None,
-    target_lat: float | None = None,
-    target_lng: float | None = None,
     extra_overrides: dict[str, object] | None = None,
     extra_modules: Iterable[str | ModuleType] | None = None,
 ) -> MachineProfile:
@@ -178,10 +176,6 @@ def activate_machine_profile(
     # 保存先だけを確定済みプロファイルに合わせて差し替える。
     if log_dir is not None:
         overrides["LOG_DIR"] = str(log_dir)
-    if target_lat is not None:
-        overrides["TARGET_LAT"] = float(target_lat)
-    if target_lng is not None:
-        overrides["TARGET_LNG"] = float(target_lng)
     if extra_overrides:
         overrides.update(extra_overrides)
 

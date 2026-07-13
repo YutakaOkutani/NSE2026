@@ -1,6 +1,5 @@
 import argparse
 import importlib.util
-import os
 import subprocess
 import sys
 import time
@@ -10,12 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mission.const import (
-    RADIO_CONTROL_ENV_KEY,
-    RADIO_DRY_RUN_ENV_KEY,
-    RADIO_RESTORE_TIMEOUT_ENV_KEY,
-    RADIO_USE_SUDO_ENV_KEY,
-)
+from mission.config import RadioConfig
 
 RADIO_MGR_PATH = PROJECT_ROOT / "mission" / "mgr" / "radio_mgr.py"
 spec = importlib.util.spec_from_file_location("radio_mgr_diag", RADIO_MGR_PATH)
@@ -25,9 +19,11 @@ RadioManager = radio_mgr_diag.RadioManager
 
 
 class RadioDiag(RadioManager):
-    def __init__(self):
+    def __init__(self, radio_config):
+        self.radio_config = radio_config
         self.devices = {}
         self.radio_disabled = False
+        self.radio_simulated_disabled = False
         self.radio_disable_time = None
         self.radio_restore_deadline = None
         self.radio_last_event = "diag_start"
@@ -84,14 +80,15 @@ def main():
         print_rfkill_status()
         return
 
-    os.environ[RADIO_CONTROL_ENV_KEY] = "mission"
-    os.environ[RADIO_RESTORE_TIMEOUT_ENV_KEY] = str(max(0.0, args.duration))
-    if args.dry_run:
-        os.environ[RADIO_DRY_RUN_ENV_KEY] = "1"
-    if args.use_sudo:
-        os.environ[RADIO_USE_SUDO_ENV_KEY] = "1"
-
-    diag = RadioDiag()
+    diag = RadioDiag(
+        RadioConfig(
+            control="mission",
+            pre_off_delay_sec=0.0,
+            restore_timeout_sec=max(0.0, args.duration),
+            use_sudo=args.use_sudo,
+            dry_run=args.dry_run,
+        )
+    )
     print("--- before ---")
     print_rfkill_status()
 

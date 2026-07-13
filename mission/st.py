@@ -6,6 +6,7 @@ from mission.const import (
     DEFAULT_OBSTACLE_DIST_CM,
     DEFAULT_PHASE,
     DEFAULT_VECTOR3,
+    SONAR_STALE_TIMEOUT_SEC,
 )
 
 
@@ -47,6 +48,8 @@ class CanSatState:
         self.cone_probability = DEFAULT_FLOAT_VALUE
         self.cone_method = ""
         self.obstacle_dist = DEFAULT_OBSTACLE_DIST_CM
+        self.obstacle_valid = False
+        self.obstacle_stale_sec = SONAR_STALE_TIMEOUT_SEC + 1.0
         self.phase = DEFAULT_PHASE
         self.gps_detect = 0
         self.cone_is_reached = False
@@ -169,10 +172,14 @@ class CanSatState:
             if cone_method is not None:
                 self.cone_method = cone_method
 
-    def update_obstacle(self, obstacle_dist=None):
+    def update_obstacle(self, obstacle_dist=None, obstacle_valid=None, obstacle_stale_sec=None):
         with self.lock:
             if obstacle_dist is not None:
                 self.obstacle_dist = obstacle_dist
+            if obstacle_valid is not None:
+                self.obstacle_valid = bool(obstacle_valid)
+            if obstacle_stale_sec is not None:
+                self.obstacle_stale_sec = float(obstacle_stale_sec)
 
     def snapshot(self):
         with self.lock:
@@ -212,6 +219,8 @@ class CanSatState:
                 "cone_probability": self.cone_probability,
                 "cone_method": self.cone_method,
                 "obstacle_dist": self.obstacle_dist,
+                "obstacle_valid": self.obstacle_valid,
+                "obstacle_stale_sec": self.obstacle_stale_sec,
                 "phase": self.phase,
                 "gps_detect": self.gps_detect,
                 "cone_is_reached": self.cone_is_reached,
