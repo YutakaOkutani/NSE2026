@@ -741,23 +741,59 @@ git branch -d refactor/remove-multi-airframe
 
 未コミットの変更があると、安全のためブランチ切り替えが拒否される場合がある。その場合は変更をコミットするか、`git stash` で一時退避してから切り替える。作業中の変更を消す可能性があるため、安易に `--force` を付けない。
 
-``` bash
-# ローカルを GitHub の最新版で完全に上書きするコマンド
+#### Raspberry Pi実機の推奨更新手順
+
+実機はGitHub上の確定済みコードを実行する環境として扱い、原則として実機上ではソースコードの編集やコミットを行わない。更新には、履歴を自動で書き換えず、単純に最新版へ進める場合だけ成功する `pull --ff-only` を使う。
+
+`main` へマージ済みの本番コードを更新する場合:
+
+```bash
+cd ~/NSE2026
+
+# 更新中の自動起動と実行中コードを止め、現在のブランチと変更状態を確認
+sudo systemctl stop cansat.timer cansat.service
+git status --short --branch
+
+# GitHubの情報を取得してmainへ切り替え、安全に最新版へ進める
 git fetch origin
-git reset --hard origin/main
-# 一行で実行するコマンド
-git fetch origin && git reset --hard origin/main
+git switch main
+git pull --ff-only origin main
+
+# 更新内容と自動テストを確認
+git log -1 --oneline
+python3 runs/spec/test_all.py
+
+# 更新後も停止状態を維持していることを確認
+sudo systemctl status cansat.timer cansat.service
 ```
 
-```bash
-# ローカルの変更を残しつつ、GitHub の更新を取り込むコマンド（pull.ver）
-git pull origin main
-```
+`git status` に `README.md` や `mission/*.py` などの変更が表示された場合は、そのまま更新しない。実機固有の `mission.toml` はGit管理外なので残るが、追跡対象ファイルの変更がある場合は、内容を確認してPC側へ退避または反映してから作業する。
+
+更新手順では安全のためミッションを自動再開しない。機体を安全な状態に置き、本番運用を今すぐ開始する意図がある場合に限り、別途 `sudo systemctl start cansat.service` を実行する。`systemctl stop` はunitを無効化しないため、有効化済みのtimerは次回起動時にも設定どおり利用できる。
+
+Pull Requestをマージする前に、実機で `refactor/remove-multi-airframe` を確認する場合:
 
 ```bash
-# ローカルの変更を残しつつ、GitHub の更新を取り込むコマンド（rebase.ver）
-git pull --rebase origin main
+cd ~/NSE2026
+sudo systemctl stop cansat.timer cansat.service
+git status --short --branch
+git fetch origin
+
+# ローカルにブランチがすでにある場合
+git switch refactor/remove-multi-airframe
+git pull --ff-only origin refactor/remove-multi-airframe
+
+python3 runs/spec/test_all.py
+sudo systemctl status cansat.timer cansat.service
 ```
+
+リモートにだけ存在するブランチを実機で初めて取得する場合は、上記の `git switch` と `git pull` の代わりに次を実行する。
+
+```bash
+git switch --track origin/refactor/remove-multi-airframe
+```
+
+実機更新では通常 `git pull --rebase` や `git reset --hard` を使用しない。`rebase` はローカルコミットを積み直す開発作業向けであり、`reset --hard` は実機上の未退避変更を消すため、原因を確認したうえで復旧が必要な場合に限る。
 
 ---
 
