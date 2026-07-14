@@ -105,7 +105,7 @@ sudo reboot
 
 ```bash
 # ===== 基本ツール =====
-sudo apt install -y git tmux i2c-tools
+sudo apt install -y git tmux i2c-tools curl
 
 # ===== 実行に必要なPythonライブラリ（apt）=====
 # GPIO / シリアル / I2C
@@ -298,18 +298,7 @@ cp mission.toml.example mission.toml
 nano mission.toml
 ```
 
-```toml
-[target]
-latitude = 38.260728
-longitude = 140.854073
-
-[radio]
-control = "off"
-pre_off_delay_sec = 3
-restore_timeout_sec = 180
-use_sudo = true
-dry_run = false
-```
+設定項目と記入例は [`mission.toml.example`](mission.toml.example) を参照する。
 
 `main.py` は座標を引数、環境変数、`mission/const.py` から取得しない。`mission.toml` がない、必須項目がない、型や範囲が不正、未知の項目がある場合は、ハードウェアを初期化せず終了する。起動前に必ず採用座標を確認する。
 
@@ -472,205 +461,119 @@ python3 main.py
 
 ## 9. 本番向けの設定
 
-### 本番運用（systemd）: 電源投入で自動起動し、SSH切断後も継続実行する手順
+### 本番運用（systemd）
 
-`tmux` は「手動起動して画面を見ながらデバッグ/運用する」ために便利。  
-本番運用（電源投入で自動起動・SSH切断の影響を受けない・異常終了時に自動復帰）には `systemd` を使う。
+`tmux` は手動起動して画面を見ながらデバッグする場合、`systemd` はSSH切断後も継続する本番運用に使用する。定義本体は [`deploy/systemd/`](deploy/systemd/) で管理する。
 
-#### 1. 前提確認（パスを固定する）
+各unitの役割は次のとおり。
 
-`systemd` は相対パスに弱いので、先に **実際の絶対パス** を確認する。
+* `cansat.service`: `main.py`を実行し、異常終了時に再起動する
+* `cansat.timer`: OS起動から5分後に`cansat.service`を開始する
+* `discord-ip.service`: DiscordへIPアドレスを通知する。ミッションのserviceとtimerには依存しない
+
+#### 1. 実機のパスを確認する
 
 ```bash
 cd ~/NSE2026
 pwd
-which python3
 ls venv/bin/python
 ```
 
-想定例（環境に合わせて読み替える）
+配布例はユーザー`pi`、配置先`/home/pi/NSE2026`を仮定している。異なる場合は、配置後の`User`、`Group`、`WorkingDirectory`、`ExecStart`を実環境に合わせて編集する。
 
-* リポジトリ: `/home/pi/NSE2026`
-* venv の Python: `/home/pi/venv/bin/python`
-
-#### 2. サービスファイルの作成
+#### 2. unitファイルを配置する
 
 ```bash
+cd ~/NSE2026
+sudo install -m 0644 deploy/systemd/cansat.service.example /etc/systemd/system/cansat.service
+sudo install -m 0644 deploy/systemd/cansat.timer.example /etc/systemd/system/cansat.timer
+sudo install -m 0644 deploy/systemd/discord-ip.service.example /etc/systemd/system/discord-ip.service
+
 sudo nano /etc/systemd/system/cansat.service
-```
-
-#### 3. 設定内容の書き込み（推奨例）
-
-```ini
-[Unit]
-Description=CanSat Main Mission Script
-# ネットワークを使う処理（通知・通信など）がある場合に備えて、ネットワーク起動後に開始する
-# Wants=network-online.target
-# After=network-online.target
-
-[Service]
-Type=simple
-User=pi
-Group=pi
-
-# ここは実際のクローン先に合わせて必ず書き換える
-WorkingDirectory=/home/pi/NSE2026
-
-# ログを journald に即時反映しやすくする（print が遅延しにくい）
-Environment=PYTHONUNBUFFERED=1
-
-# venv を使う場合は venv の python を使う（activate は不要）
-# ※ パスは必ず実環境に合わせる
-ExecStart=/home/pi/NSE2026/venv/bin/python /home/pi/NSE2026/main.py
-
-# 異常終了時に自動再起動（ミッション継続のため重要）
-Restart=on-failure
-RestartSec=5
-
-# 手動停止時の扱いを安定させるための猶予
-TimeoutStopSec=15
-
-# 標準出力/標準エラーは journalctl で確認する
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-補足（重要）
-
-* `WorkingDirectory` と `ExecStart` のパスがズレると起動失敗するので、必ず実際の環境に合わせて書き換えること
-* `venv` を使う場合、`source venv/bin/activate` は不要。`ExecStart` に venv の Python を直接書くのが `systemd` の定石
-* `Restart=on-failure` はクラッシュ時に再起動し、`sudo systemctl stop cansat.service` のような手動停止時は再起動しないので運用しやすい
-* 通信を使わない構成なら `network-online.target` は必須ではないが、将来の通知機能などを考えると入れておく方が無難
-* `main.py` はリポジトリ直下の `mission.toml` を必須設定として読む。Wi-Fi 停止/復帰の切り替えと試験方法は [`docs/operations/radio_control.md`](docs/operations/radio_control.md) を参照する
-* 通常ユーザー実行のまま Wi-Fi を切る場合は、`rfkill` だけ passwordless sudo を許可する。手順は同文書の「rfkill の passwordless sudo 設定」を参照する
-
-#### 4. `cansat.timer` の作成（起動から5分後に開始する）（任意）
-
-電源投入直後ではなく、**起動から5分後** に `cansat.service` を開始したい場合は、`timer` を使う。
-
-```bash
 sudo nano /etc/systemd/system/cansat.timer
-```
-
-```ini
-[Unit]
-Description=Start CanSat mission 5 minutes after boot
-
-[Timer]
-# systemd 起動（=OS起動）から5分後に cansat.service を実行
-OnBootSec=5min
-
-# この timer が起動する対象ユニット
-Unit=cansat.service
-
-# タイミングの揺れを小さくしたい場合（任意）
-AccuracySec=1s
-
-[Install]
-WantedBy=timers.target
-```
-
-補足
-
-* `cansat.timer` は「いつ起動するか」を担当し、実際の処理本体は `cansat.service` が担当する
-* 自動起動の有効化は `cansat.service` ではなく **`cansat.timer`** に対して行う（`service` は timer から呼ばれる）
-
-#### 5. サービス / タイマーの有効化
-
-```bash
-# 設定の反映
+sudo nano /etc/systemd/system/discord-ip.service
 sudo systemctl daemon-reload
-
-# 起動時に自動起動 + 今すぐタイマーを開始（5分カウント開始）
-sudo systemctl enable --now cansat.timer
 ```
 
-初回の動作確認で「5分待たずにすぐ実行したい」場合だけ、手動でサービスを起動してよい。
+`cansat.timer`の`OnBootSec`は開始までの待ち時間で、配布例では`5min`としている。必要に応じて配置後の`/etc/systemd/system/cansat.timer`を編集する。`cansat.service`と`discord-ip.service`は、ユーザー名とパスを必ず確認する。
+
+unit更新時は同じ`install`コマンドで再配置し、編集が必要な項目を再確認してから`sudo systemctl daemon-reload`を実行する。
+
+#### 3. 自動起動を選択する
+
+ミッションを起動から5分後に開始する場合は、`cansat.service`を直接enableせず、timerをenableする。
 
 ```bash
+sudo systemctl enable cansat.timer
+```
+
+Discord通知をOS起動時に実行する場合は、Discord側だけをenableする。
+
+```bash
+sudo systemctl enable discord-ip.service
+```
+
+`enable`は次回起動時の設定だけを変更し、その場では実行しない。ミッションとDiscord通知は別々に有効・無効を管理できる。
+
+#### 4. 手動で起動・停止する
+
+```bash
+# ミッションを今すぐ開始
 sudo systemctl start cansat.service
-```
 
-#### 6. 状態・ログの確認（必須）
-
-```bash
-# タイマーが有効か確認（NEXT に次回実行予定が出る）
-sudo systemctl list-timers cansat.timer
-sudo systemctl status cansat.timer
-```
-
-```bash
-# 稼働状態の確認（active (running) になっているか）
-sudo systemctl status cansat.service
-```
-
-```bash
-# 直近ログを表示
-sudo journalctl -u cansat.service -e
-```
-
-```bash
-# リアルタイムでログを追う（デバッグ時に便利）
-sudo journalctl -u cansat.service -f
-```
-
-#### 7. 運用で使う基本コマンド
-
-```bash
-# 再起動（コード更新後など）
-sudo systemctl restart cansat.service
-
-# タイマーの5分カウントを今この瞬間からやり直したい場合
-sudo systemctl restart cansat.timer
-
-# 停止
+# ミッションを停止
 sudo systemctl stop cansat.service
 
-# 自動起動（5分遅延起動）の停止
-sudo systemctl stop cansat.timer
+# Discord通知を今すぐ実行
+sudo systemctl start discord-ip.service
 
-# 自動起動の無効化（必要時のみ）
-sudo systemctl disable cansat.timer
-
-# 自動起動設定の確認
-automatically_enabled=$(sudo systemctl is-enabled cansat.timer); echo $automatically_enabled
+# ミッションの5分遅延自動起動だけを無効化
+sudo systemctl disable --now cansat.timer
 ```
 
-#### 8. 本当に「電源投入から5分後に自動起動」するか確認（重要）
+`cansat.timer`を無効化しても、`cansat.service`と`discord-ip.service`は手動で起動できる。Discordの自動起動設定にも影響しない。
+
+#### 5. 状態とログを確認する
+
+```bash
+sudo systemctl status cansat.timer
+sudo systemctl list-timers cansat.timer
+sudo systemctl status cansat.service
+sudo journalctl -u cansat.service -e
+sudo journalctl -u cansat.service -f
+sudo journalctl -u discord-ip.service -e
+```
+
+`discord-ip.service`は1回実行して終了する`Type=oneshot`なので、送信後に`inactive (dead)`と表示されるのは正常。送信結果は`journalctl`で確認する。
+
+#### 6. 再起動後の動作を確認する
 
 ```bash
 sudo reboot
 ```
 
-再起動後に SSH 接続して、以下を確認する。
+再接続後に、今回の起動分だけを確認する。
 
 ```bash
 sudo systemctl status cansat.timer
 sudo systemctl list-timers cansat.timer
 sudo systemctl status cansat.service
 sudo journalctl -u cansat.service -b
+sudo journalctl -u discord-ip.service -b
 ```
 
-`-b` は「今回の起動（boot）分のログだけ」を見るためのオプション。
+#### 7. よくある起動失敗ポイント
 
-#### 9. よくある起動失敗ポイント（先に潰す）
+* `WorkingDirectory`または`ExecStart`が実際の配置と違う
+* `/home/pi/NSE2026/venv/bin/python`が存在しない
+* unitの`User`または`Group`が実機のユーザーと違う
+* `mission.toml`または`discord.env`が作成されていない
+* 仮想環境に必要なライブラリが入っていない
+* `cansat.service`を直接enableして、意図せず起動直後にも実行している
 
-* パス違い: `WorkingDirectory` / `ExecStart` が実際の配置と違う
-* venv 未作成: `/home/pi/NSE2026/venv/bin/python` が存在しない
-* 権限問題: `User=pi` でアクセスできないファイル/ディレクトリがある
-* ライブラリ不足: 手動実行では動いたが、`venv` 側に必要ライブラリが入っていない
-* 例外で即終了: `sudo journalctl -u cansat.service -e` で Python の traceback を確認
-* timer の有効化漏れ: `cansat.service` ではなく `cansat.timer` を `enable` しているか確認
+`main.py`はリポジトリ直下の`mission.toml`を必須設定として読む。Wi-Fi停止・復帰の切り替えと試験方法は [`docs/operations/radio_control.md`](docs/operations/radio_control.md) を参照する。通常ユーザーのままWi-Fiを切る場合は、同文書に従い`rfkill`だけpasswordless sudoを許可する。
 
-#### 10. `tmux` との使い分け（整理）
-
-* `tmux`: 手動起動・画面確認・その場のデバッグ向け
-* `systemd`: 本番常駐・自動起動・異常終了時の自動復帰向け
-
-本番中に一時的に手動デバッグしたい場合は、先に `sudo systemctl stop cansat.service` してから `tmux` で起動する（同時起動を避ける）。
+本番中に一時的に`tmux`でデバッグする場合は、先に`sudo systemctl stop cansat.service`を実行し、二重起動を避ける。
 
 ---
 
@@ -941,100 +844,52 @@ ssh ユーザー名@IPアドレス
 
 ---
 
-### Raspberry Pi Zero 2 W の起動時にIPアドレスを任意のDiscordサーバーに送信させるようにする方法（シェルスクリプトの方法）
+### Raspberry PiのIPアドレスをDiscordへ通知する
 
-#### 0. Discordでウェブフックのリンクを取得
+通知スクリプト本体は [`scripts/discord_ip.sh`](scripts/discord_ip.sh)、自動起動用のunitは [`deploy/systemd/discord-ip.service.example`](deploy/systemd/discord-ip.service.example) で管理する。Webhook URLはスクリプトやunitへ直接記載せず、Git管理外の`discord.env`から読み込む。
 
-* Discordにログインし、ウェブフックを作成したいサーバーを選択
+#### 1. Discord Webhookを作成する
 
-* チャンネルの"Server Settings"を開き、"Integrations"タブを選択し、"Webhooks"をクリック
+Discordの対象チャンネルで「Server Settings」→「Integrations」→「Webhooks」を開き、Webhookを作成してURLをコピーする。
 
-* "New Webhook"をクリックし、ウェブフックの名前やアイコンを設定。
-
-* ウェブフックURLをコピー
-
-#### 1. スクリプトファイルを作成
+#### 2. 通知設定を作成する
 
 ```bash
-nano ~/discord_ip.sh
+cd ~/NSE2026
+cp discord.env.example discord.env
+nano discord.env
+chmod 600 discord.env
 ```
 
-#### 2. 以下のコードを貼り付け
+`DISCORD_WEBHOOK_URL`にコピーしたURLを設定する。`discord.env`はGit管理外であり、コミットしない。
+
+#### 3. 任意のタイミングで通知する
+
+スクリプトを直接実行する場合:
 
 ```bash
-#!/bin/bash
-
-WEBHOOK_URL="ここにコピーしたURLを貼り付ける"
-
-# IPアドレス取得関数 (Google DNSへのルート情報から取得)
-get_ip() {
-    ip route get 8.8.8.8 | grep -oP 'src \K\S+'
-}
-
-# 最大10回リトライ
-for i in {1..10}; do
-    IP_ADDR=$(get_ip)
-    
-    if [ -n "$IP_ADDR" ]; then
-        # JSONペイロードの作成
-        PAYLOAD="{\"content\": \"🚀 起動成功！\\nIPアドレス: \`$IP_ADDR\`\"}"
-        
-        # Discordへ送信 (-s: 静かに, -o: 出力なし, -w: ステータスコード表示)
-        STATUS=$(curl -H "Content-Type: application/json" -X POST -d "$PAYLOAD" -s -o /dev/null -w "%{http_code}" "$WEBHOOK_URL")
-        
-        if [ "$STATUS" -eq 204 ]; then
-            echo "Successfully sent to Discord"
-            exit 0
-        else
-            echo "Post failed with status: $STATUS"
-        fi
-    fi
-    
-    echo "Retry $i..."
-    sleep 30
-done
+cd ~/NSE2026
+./scripts/discord_ip.sh
 ```
 
-#### 3. スクリプトに実行権限を付与
+systemdの配置後は、同じスクリプトをservice経由でも実行できる。
 
 ```bash
-chmod +x ~/discord_ip.sh
+sudo systemctl start discord-ip.service
+sudo journalctl -u discord-ip.service -e
 ```
 
-#### 4. 試しに実行してみる
+ネットワークまたはIPアドレスがまだ利用できない場合、スクリプトは30秒間隔で最大10回再試行する。
+
+#### 4. OS起動時の通知を設定する
+
+unitの配置と実機固有パスの編集は「本番運用（systemd）」の手順に従う。次回のOS起動からDiscord通知を実行する場合は、serviceをenableする。
 
 ```bash
-./discord_ip.sh
+sudo systemctl enable discord-ip.service
 ```
 
-#### 5. 自動起動の設定をする
-
-ラズパイが電源ONになったとき、このスクリプトを自動で実行するように設定。ここでは crontab を使う。
-
-##### 1. ラズパイのターミナルで以下を実行
-
-```bash
-crontab -e
-```
-
-（初めて使う場合は、1番の nano を選択）
-
-##### 2. 一番下の行に、以下の内容を追記（起動時と5分おき（任意）に実行するように設定）
-
-```plaintext
-@reboot ~/discord_ip.sh
-*/5 * * * * ~/discord_ip.sh
-```
-
-ファイルパスは適応書き換え
-
-##### 3. 保存して終了
-
-##### 4. 再起動
-
-```bash
-sudo reboot
-```
+ミッションの自動起動を止める場合は`cansat.timer`だけを無効化する。`discord-ip.service`は独立しているため、その設定と手動実行には影響しない。
 
 ---
 

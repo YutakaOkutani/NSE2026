@@ -1,0 +1,10 @@
+[Unit]
+Description=Start CanSat mission 5 minutes after boot
+
+[Timer]
+OnBootSec=5min
+Unit=cansat.service
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
