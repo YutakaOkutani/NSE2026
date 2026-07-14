@@ -1,6 +1,6 @@
 # NSE2026 ドキュメント
 
-セットアップと基本的な実行方法は、リポジトリ直下の [`README.md`](../README.md) を参照してください。設計、開発方針、試験・運用手順はこの `docs/` 配下に集約しています。
+セットアップと本番実行の入口は、リポジトリ直下の [`README.md`](../README.md) を参照してください。診断・試験コマンド、設計、開発方針、運用手順はこの `docs/` 配下に集約しています。
 
 ## はじめに読む
 
@@ -14,7 +14,7 @@
 - [ミッション本体](development/mission.md)
   - `mission/`、`mgr/`、`phases/` の設計・デバッグ指針
 - [試験コード](development/testing.md)
-  - `runs/`、`diag/`、`spec/`、`orch/`、`cam/` の役割
+  - 実行コマンド一覧、HC-SR04の安全な接続、`runs/`、`diag/`、`spec/`、`orch/`、`cam/` の役割
 - [解析・低レイヤコンポーネント](development/components.md)
   - `analysis/` と `lib/` の設計指針
 - [フローチャート](flowchart/README.md)

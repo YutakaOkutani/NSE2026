@@ -53,7 +53,8 @@ def main():
     print(f"  max distance : {SONAR_MAX_DISTANCE:.1f} m")
     print(f"  stale limit  : {SONAR_STALE_TIMEOUT_SEC:.1f} s")
     print(f"  avoid limit  : {OBSTACLE_AVOID_DIST:.1f} cm")
-    print("CAUTION: level-shift the sensor ECHO output to 3.3 V before connecting it to GPIO.")
+    print("CAUTION: standard HC-SR04 ECHO is 5 V; never connect it directly to Raspberry Pi GPIO.")
+    print("CAUTION: the current PCB has no level conversion; add an external divider or level shifter.")
     print("Place a flat object in front of the sensor and move it. Ctrl+C to exit.")
 
     pin_factory = None

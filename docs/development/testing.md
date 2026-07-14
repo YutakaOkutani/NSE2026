@@ -1,5 +1,30 @@
 # 試験コードの設計・デバッグ指針
 
+## 実行コマンド一覧
+
+必要なら先に仮想環境を有効化する。コマンドはリポジトリ直下で実行する。
+
+```bash
+source venv/bin/activate
+cd ~/NSE2026
+```
+
+| 目的 | コマンド |
+| --- | --- |
+| 本番相当の全体実行 | `python3 main.py` |
+| パラ投下・着地衝撃試験 | `python3 runs/orch/p0_p1.py` |
+| センサ診断 | `python3 runs/diag/sensor.py` |
+| 超音波センサ診断 | `python3 runs/diag/sonar.py` |
+| GPS診断 | `python3 runs/diag/gps.py` |
+| モータ診断 | `python3 runs/diag/motor.py` |
+| LED診断 | `python3 runs/diag/led.py` |
+| 本番detector用ROI参照画像の撮影 | `python3 lib/roi_capture.py --count 3 --interval 0.5` |
+| 現場サンプルの収集 | `python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample` |
+| 本番detectorのライブデバッグ | `python3 runs/cam/detect_dbg.py --phase 4` |
+| ログ解析（PC上） | `python3 analysis/log.py` |
+
+現場サンプルは学習・比較・記録用であり、本番ROIには自動反映されない。
+
 ## `runs/`: 試験インターフェース
 
 `runs/` は試験のためのディレクトリである。本番品質を落とさず、切り分けの速度を上げるための「検証インターフェース」として維持する。
@@ -54,6 +79,45 @@
 - 異常時は「無反応」「値異常」「初期化失敗」を区別する
 - モータ系は安全停止を最優先する
 - 実機試験前の点検を標準化し、上位フェーズ不具合とハード不具合を切り分ける
+
+### 超音波センサ（HC-SR04）の安全な接続
+
+標準HC-SR04は5 Vで動作し、ECHOも5 Vのパルスを出力する。一方、Raspberry PiのGPIO入力は3.3 Vまでであるため、ECHOをGPIO24へ直結してはならない。2026-04-13版の現行基板には、このレベル変換回路が実装されていない。
+
+既製基板を使用する場合は、センサと基板の間に次の外付け分圧回路を入れる。TRIGはGPIO23から直接接続できる。
+
+```text
+HC-SR04                         Raspberry Pi / 基板
+
+VCC  -------------------------------- 5 V
+GND  -------------------------------- GND
+TRIG -------------------------------- GPIO23
+ECHO ---- 10 kΩ ----+---------------- GPIO24
+                    |
+                   10 kΩ
+                    |
+                   GND
+```
+
+この分圧では、ECHOの5 VがGPIO側で約2.5 Vになる。次版の基板では、ECHO信号上に分圧抵抗2本または適切なレベル変換回路を追加する。HC-SR04互換品には電圧仕様の異なる製品もあるが、型番だけで3.3 V対応と判断せず、採用品の仕様を確認する。
+
+配線を直してから次を実行し、対象物を前後に動かして`VALID`の距離が追従することを確認する。
+
+```bash
+python3 runs/diag/sonar.py --duration 10
+```
+
+- `VALID`: 正常な距離を取得した
+- `HOLD`: 一時的に読み取れず、直前の正常値を保持している
+- `STALE`: 最終正常値から1秒以上更新されていない
+
+すでにECHOを直結して使用していた場合も、読み取りできていることを安全性の根拠にしない。分圧回路を追加するまでは再通電しない。
+
+根拠資料:
+
+- [HC-SR04データシート](https://cdn.sparkfun.com/datasheets/Sensors/Proximity/HCSR04.pdf)
+- [Raspberry Pi GPIO仕様](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#voltage-specifications)
+- [Adafruit: HC-SR04を3.3 V GPIOへ接続する方法](https://cdn-learn.adafruit.com/downloads/pdf/distance-measurement-ultrasound-hcsr04.pdf)
 
 ## `runs/spec/`: 仕様試験
 

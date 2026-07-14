@@ -44,52 +44,47 @@
 
 ---
 
-### 2.2 初回起動と接続
+### 2.2 初回起動とSSH接続
 
-1. microSD を ラズパイ に挿入して電源投入
-2. PC から次のコマンドで接続
+1. microSDカードをRaspberry Piに挿入し、電源を入れる
+2. 次のいずれかの方法で、Raspberry PiのIPアドレスを確認する
 
-    ```bash
-    ssh ユーザー名@ホスト名.local（or IPアドレス）
-    ```
+   * モニターとキーボードを使用する場合は、Raspberry Piへログインして次のコマンドを実行する
 
-3. パスワードは Imager で設定したものを使用
+      ```bash
+      ip address # ip a または ip addr でも可
+      ```
 
-### 2.3 接続できない場合は以下を確認
+   * モニターを使用しない場合は、PCとRaspberry Piを同じネットワークに接続し、[Angry IP Scanner](https://angryip.org/)でネットワーク内の端末を検索する。Raspberry Pi Imagerで設定したホスト名を目印にIPアドレスを確認する
 
-1. 同一ネットワークにいるか
-2. `.local` 解決ができない環境では、ラズパイの IPアドレス を確認して、ホスト名のところを IP に置き換えて接続する（WindowsやAndroid端末では、mDNS（.local）が安定的にサポートされておらず、ホスト名接続は一般に不安定）
-3. Permission denied (publickey,password).が出る場合、以下のコマンドで接続
+3. PCのターミナルからSSH接続する
 
     ```bash
-    ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no ユーザー名@IPアドレス
+    ssh ユーザー名@IPアドレス
     ```
 
-4. その後、以下のコマンドでラズパイ上の設定を確認
+4. Raspberry Pi Imagerで設定したパスワードを入力する
 
-    ```bash
-    sudo nano /etc/ssh/sshd_config
-    ```
+macOSなど、`.local`による名前解決を利用できる環境では、次の方法でも接続できる。
 
-5. その中に、以下の行があれば確認。
+```bash
+ssh ユーザー名@ホスト名.local
+```
 
-    ```plaintext
-    PasswordAuthentication yes
-    ```
+### 2.3 SSH接続できない場合
 
-6. PasswordAuthentication が no になっていたら yes に変更。
+次の点を確認する。
 
-7. "#" でコメントアウトされている場合は、"#" を外して PasswordAuthentication yes にする
+* PCとRaspberry Piが同じネットワークに接続されているか
+* ユーザー名とパスワードがRaspberry Pi Imagerで設定したものと一致しているか
+* Angry IP Scannerまたは`ip address`で、現在のIPアドレスを確認したか
+* 電源を入れてから起動が完了するまで十分に待ったか
 
-8. 設定を変更したら、SSH サーバーを再起動。
-
-    ```bash
-    sudo systemctl restart ssh
-    ```
+解決しない場合は、モニターとキーボードを接続し、Wi-FiやSSHの設定を確認する。
 
 ---
 
-### 2.3 初期アップデート
+### 2.4 初期アップデート
 
 ```bash
 sudo apt update
@@ -308,48 +303,23 @@ nano mission.toml
 
 ## 5.2 ドキュメント
 
-セットアップと基本コマンドはこの `README.md`、設計・開発方針・運用手順は [`docs/index.md`](docs/index.md) を入口として参照する。
+セットアップと本番実行の入口はこの `README.md`、診断・試験コマンド、設計・開発方針・運用手順は [`docs/index.md`](docs/index.md) を入口として参照する。
 
 コードフォルダには入口として必要な `README.md` だけを置き、それ以外の Markdown 文書は `docs/` 配下で管理する。
 
 ---
 
-## 5.3 実行コマンド早見表
-
-前提:
-
-* 作業ディレクトリは `~/NSE2026`
-* 必要なら先に仮想環境を有効化: `source venv/bin/activate`
+## 5.3 実行
 
 ```bash
-# E2E試験時実行
+cd ~/NSE2026
+source venv/bin/activate
 python3 main.py
-
-# パラ投下・着地衝撃試験時実行
-python3 runs/orch/p0_p1.py
-
-# 各種テストコード
-python3 runs/diag/sensor.py
-python3 runs/diag/sonar.py
-python3 runs/diag/gps.py
-python3 runs/diag/motor.py
-python3 runs/diag/led.py
-
-# 画像・カメラ系
-# ROI参照画像（本番detectorが読む画像）を撮影
-python3 lib/roi_capture.py --count 3 --interval 0.5
-
-# 現場サンプル収集（学習・比較・記録用。本番ROIには自動反映されない）
-python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample
-
-# 本番detectorのライブデバッグ
-python3 runs/cam/detect_dbg.py --phase 4
-
-# ログ解析（PC上で実行）
-python3 analysis/log.py
 ```
 
-超音波センサだけを確認する場合は `python3 runs/diag/sonar.py` を実行し、対象物を前後に動かして `VALID` の距離が追従することを確認する。`HOLD` は一時的な読取失敗、`STALE` は最終正常値から1秒以上更新されていない状態を示す。10秒で自動終了する場合は `--duration 10` を付ける。ECHO出力はGPIOへ直結せず、必ず3.3 Vへレベル変換する。
+診断・部分統合・カメラ・解析のコマンドは [`docs/development/testing.md`](docs/development/testing.md#実行コマンド一覧) を参照する。
+
+> **注意:** 標準HC-SR04のECHOは5 V出力であり、Raspberry PiのGPIOへ直結できない。現行基板にはレベル変換回路がないため、使用前に外付け分圧回路を入れる。配線は[超音波センサの安全な接続](docs/development/testing.md#超音波センサhc-sr04の安全な接続)を参照する。
 
 ---
 
@@ -700,147 +670,11 @@ git switch --track origin/refactor/remove-multi-airframe
 
 ---
 
-### VPNサービスを使って、ラズパイのIPアドレスを固定化する方法（Tailscaleを使う方法）
+### 任意のリモート接続手段
 
-#### 0. そもそも
+別のネットワークからRaspberry Piへ接続したい場合や、接続先のIPアドレスを管理しやすくしたい場合は、TailscaleなどのVPNサービスを利用できる。必要になった時点で、[Tailscale公式サイト](https://tailscale.com/)のRaspberry Pi向け設定方法を確認する。
 
-前述のとおり、WindowsPCやAndroid端末は、mDNSが不安定なので、ラズパイとのSSH接続にはIPアドレスが必要
-
-##### 仮想VPNサービス（ここではTailscale）を使えば
-
-Tailscaleに登録された各デバイスは：
-
-* 固定の仮想IPアドレスを持つ（100.x.y.z 形式）
-
-* デバイスがオンラインの間、そのIPは常に同じ
-
-* 管理画面に表示される
-
-* そのIPで直接SSH接続が可能になる（実際のネットワークは同じでなくてもよい）
-
-```powershell
-ssh pi@100.x.y.z
-```
-
-#### 1. 構成手順
-
-##### 0. 前提
-
-PC: Windows（Macならそもそもこの問題は起きないので設定不要）
-スマホ: Android
-
-##### 1. アカウント作成（PCで）
-
-[https://tailscale.com/](https://tailscale.com/)
-
-* Google / GitHub / Microsoft などでログイン
-* これが 仮想LAN になる
-
-##### 2. Windows にインストール
-
-[https://tailscale.com/download](https://tailscale.com/download)
-
-* Windows版をDL
-* インストール
-* ログイン
-* Tailscale はタスクトレイ常駐アプリとしてふるまう。
-
-##### 3. スマホ にも入れる
-
-* デスクトップで表示されるQRコードか Playストア で検索してインストール
-* ログイン
-* デスクトップに端末が追加されたか確認
-* 案内されるテストコマンドをPCで実行して接続を確認できる
-
-```powershell
-ping 100.x.y.z
-```
-
----
-
-##### 4.  Raspberry Pi にもインストール
-
-ラズパイで：
-
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-```
-
-終わったら：
-
-```bash
-sudo tailscale up
-```
-
-すると、URLが出るので、**PCで開いてログイン**。
-
-##### 5. ここまでで何が起きているか
-
-この時点で：
-
-* Windows
-* Android
-* Raspberry Pi
-
-が **同じ仮想LAN** に入る
-
----
-
-##### 6. ラズパイの固定IPを確認する
-
-ラズパイで：
-
-```bash
-tailscale ip -4
-```
-
-例：
-
-`100.64.12.34`
-
-これがTaliscaleで表示される内容と一致するか確認する
-
----
-
-##### 7. SSH接続
-
-Windowsから：
-
-```powershell
-ssh pi@100.64.12.34
-```
-
-##### 8. 再起動時に自動接続
-
-通常は自動で再接続されるが、念のため
-
-```bash
-sudo tailscale set --auto-update
-```
-
----
-
-### VSCodeでSSH接続したラズパイのターミナルを操作する方法
-
-#### 1. VS Codeで拡張機能「Remote - SSH」をインストールする
-
-#### 2. 接続
-
-* 左下の「><」アイコン（リモート接続）からRemote-SSH: Connect to Host… を選択
-* 以下を入力
-
-```powershell
-ssh ユーザー名@IPアドレス
-```
-
-* 接続後、VS Code 下部のステータスバーが「SSH: Raspberry Pi」表示になる
-
-* Terminal → New Terminal を開くと、Pi のターミナルが利用可能
-
-#### 3. 注意点
-
-* 初回接続時は Pi 側に VS Code サーバが自動インストールされる。
-* ターミナルは Pi のユーザ権限で動く（root操作は sudo）。
+Raspberry Pi上のファイルをPCから直接編集したい場合は、VS Codeの「Remote - SSH」拡張機能も利用できる（任意）。通常のターミナル操作だけであれば、`ssh`コマンドで十分である。
 
 ---
 
