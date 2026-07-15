@@ -556,106 +556,11 @@ sudo journalctl -u discord-ip.service -b
 
 ---
 
-## 10. 便利なコマンドや設定
+## 10. Raspberry Piでよく使うGitコマンド
 
-### 基本的なgit操作コマンド
+ソースコードの編集、コミット、GitHubへのプッシュはPCで行う。Raspberry PiはGitHubのコードを実行する環境とし、実機上ではソースコードの編集やコミットを行わない。
 
-```bash
-# ファイルをステージングに追加
-git add .
-# コミットを作成
-git commit -m "Initial commit"
-# GitHub へ初回プッシュ
-git push -u origin main
-# 2回目以降
-git push
-```
-
-#### Gitの状態をプロンプトに表示する（任意）
-
-[Starship](https://starship.rs/)を導入すると、現在のGitブランチや未コミットの変更をシェルプロンプトで確認でき、ブランチの取り違えや変更の見落としを減らせる。Raspberry Piの標準Bashでは、次のように導入する。
-
-```bash
-curl -sS https://starship.rs/install.sh | sh
-```
-
-`~/.bashrc`を開く。
-
-```bash
-nano ~/.bashrc
-```
-
-ファイルの末尾に次の1行を追加して保存する。
-
-```bash
-eval "$(starship init bash)"
-```
-
-nanoを終了したら、設定を反映する。
-
-```bash
-source ~/.bashrc
-```
-
-記号が正しく表示されない場合は、SSH接続元PCのターミナルにNerd Fontを設定する。
-
-Starshipはリモートリポジトリの更新を自動取得しない。更新前には、後述の手順どおり`git fetch origin`や`git pull --ff-only origin main`を実行する。
-
-#### ブランチの作成・切り替え
-
-ブランチを切り替える前に、未コミットの変更がないか確認する。
-
-```bash
-git status
-```
-
-`main` から新しい作業ブランチを作成し、そのブランチへ切り替える場合:
-
-```bash
-git switch main
-git pull --ff-only origin main
-git switch -c refactor/remove-multi-airframe
-```
-
-すでにローカルに存在する作業ブランチへ切り替える場合:
-
-```bash
-git switch refactor/remove-multi-airframe
-```
-
-リモートにだけ存在する作業ブランチを初めてローカルへ取得する場合:
-
-```bash
-git fetch origin
-git switch --track origin/refactor/remove-multi-airframe
-```
-
-現在のブランチと、ローカルに存在するブランチの一覧は次のコマンドで確認できる。先頭に `*` があるものが現在のブランチ。
-
-```bash
-git branch
-git status --short --branch
-```
-
-作業ブランチを初めてGitHubへプッシュする場合:
-
-```bash
-git push -u origin refactor/remove-multi-airframe
-```
-
-Pull Requestのマージ後は `main` に戻り、最新版を取得してから不要になったローカルブランチを削除する。
-
-```bash
-git switch main
-git pull --ff-only origin main
-git branch -d refactor/remove-multi-airframe
-```
-
-未コミットの変更があると、安全のためブランチ切り替えが拒否される場合がある。その場合は変更をコミットするか、`git stash` で一時退避してから切り替える。作業中の変更を消す可能性があるため、安易に `--force` を付けない。
-
-#### Raspberry Pi実機の推奨更新手順
-
-実機はGitHub上の確定済みコードを実行する環境として扱い、原則として実機上ではソースコードの編集やコミットを行わない。更新には、履歴を自動で書き換えず、単純に最新版へ進める場合だけ成功する `pull --ff-only` を使う。
+### `main`の最新版を取り込む
 
 `main` へマージ済みの本番コードを更新する場合:
 
@@ -666,7 +571,7 @@ cd ~/NSE2026
 sudo systemctl stop cansat.timer cansat.service
 git status --short --branch
 
-# GitHubの情報を取得してmainへ切り替え、安全に最新版へ進める
+# GitHubの最新版を取り込む
 git fetch origin
 git switch main
 git pull --ff-only origin main
@@ -679,11 +584,13 @@ python3 runs/spec/test_all.py
 sudo systemctl status cansat.timer cansat.service
 ```
 
-`git status` に `README.md` や `mission/*.py` などの変更が表示された場合は、そのまま更新しない。実機固有の `mission.toml` はGit管理外なので残るが、追跡対象ファイルの変更がある場合は、内容を確認してPC側へ退避または反映してから作業する。
+`git status` に追跡対象ファイルの変更が表示された場合は、そのまま更新せず原因を確認する。Git管理外の `mission.toml` は更新の影響を受けない。
 
 更新手順では安全のためミッションを自動再開しない。機体を安全な状態に置き、本番運用を今すぐ開始する意図がある場合に限り、別途 `sudo systemctl start cansat.service` を実行する。`systemctl stop` はunitを無効化しないため、有効化済みのtimerは次回起動時にも設定どおり利用できる。
 
-Pull Requestをマージする前に、実機で `refactor/remove-multi-airframe` を確認する場合:
+### ブランチを切り替える
+
+Pull Requestをマージする前など、実機で作業ブランチを確認する場合:
 
 ```bash
 cd ~/NSE2026
@@ -691,7 +598,7 @@ sudo systemctl stop cansat.timer cansat.service
 git status --short --branch
 git fetch origin
 
-# ローカルにブランチがすでにある場合
+# 例: ブランチ名が refactor/remove-multi-airframe の場合
 git switch refactor/remove-multi-airframe
 git pull --ff-only origin refactor/remove-multi-airframe
 
@@ -699,13 +606,13 @@ python3 runs/spec/test_all.py
 sudo systemctl status cansat.timer cansat.service
 ```
 
-リモートにだけ存在するブランチを実機で初めて取得する場合は、上記の `git switch` と `git pull` の代わりに次を実行する。
+ブランチを実機で初めて取得する場合は、上記の `git switch` と `git pull` の代わりに次を実行する。
 
 ```bash
 git switch --track origin/refactor/remove-multi-airframe
 ```
 
-実機更新では通常 `git pull --rebase` や `git reset --hard` を使用しない。`rebase` はローカルコミットを積み直す開発作業向けであり、`reset --hard` は実機上の未退避変更を消すため、原因を確認したうえで復旧が必要な場合に限る。
+確認後に `main` へ戻す場合は、「`main`の最新版を取り込む」の手順を実行する。実機では `git commit`、`git push`、`git pull --rebase`、`git reset --hard` は使用しない。
 
 ---
 
@@ -713,7 +620,7 @@ git switch --track origin/refactor/remove-multi-airframe
 
 別のネットワークからRaspberry Piへ接続したい場合や、接続先のIPアドレスを管理しやすくしたい場合は、TailscaleなどのVPNサービスを利用できる。必要になった時点で、[Tailscale公式サイト](https://tailscale.com/)のRaspberry Pi向け設定方法を確認する。
 
-Raspberry Pi上のファイルをPCから直接編集したい場合は、VS Codeの「Remote - SSH」拡張機能も利用できる（任意）。通常のターミナル操作だけであれば、`ssh`コマンドで十分である。
+Raspberry Pi上の設定やログをPCから確認する場合は、VS Codeの「Remote - SSH」拡張機能も利用できる（任意）。通常のターミナル操作だけであれば、`ssh`コマンドで十分である。
 
 ---
 
