@@ -14,7 +14,9 @@ from mission.const import (
     PHASE2_CALIB_STABLE_SEC,
     PHASE2_OFFSET_CONTROL_SETTLE_TIME,
     PHASE2_OFFSET_LEG_MAX_TIME,
+    PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC,
     PHASE2_OFFSET_MODE_COLLECT,
+    PHASE2_OFFSET_MODE_READINESS,
     PHASE2_OFFSET_MODE_TURNAROUND,
     PHASE2_STAGE_CALIBRATION,
     PHASE2_STAGE_ESCAPE,
@@ -64,8 +66,18 @@ class _Controller:
         self.phase2_offset_stage_retry_count = 0
         self.phase2_offset_settle_until = 0.0
         self.phase2_offset_leg_start_time = 0.0
+        self.phase2_offset_progress_anchor_time = 0.0
+        self.phase2_offset_progress_anchor_distance_m = 0.0
+        self.phase2_offset_near_goal_active = False
+        self.phase2_offset_leg_time_limit_sec = PHASE2_OFFSET_LEG_MAX_TIME
         self.phase2_offset_observed_bno_recovery_seq = 0
         self.phase2_offset_reject_reason = ""
+        self.phase2_offset_mode_start_time = 0.0
+        self.phase2_entry_ready_count = 0
+        self.phase2_heading_quality_valid = False
+        self.phase2_last_bno_recovery_time = 0.0
+        self.phase3_heading_entry_ready = False
+        self.bno_stale_sec = 0.0
         self.bno_heading_recovery_seq = 0
         self.phase3_arrival_confirm_count = 0
         self.phase3_arrival_inside_since = None
@@ -129,8 +141,11 @@ class Phase2FlowTest(unittest.TestCase):
         ctrl.phase2_offset_settle_until = PHASE2_OFFSET_CONTROL_SETTLE_TIME
         ctrl.bno_heading_offset_deg = 172.0
         ctrl.bno_heading_offset_valid = True
-        with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_CONTROL_SETTLE_TIME + 0.1):
-            Phase2Handler().execute(ctrl, {"gps_fix_seq": 20})
+        ctrl.phase2_heading_quality_valid = True
+        ctrl.phase2_offset_mode = PHASE2_OFFSET_MODE_READINESS
+        ctrl.phase2_entry_ready_count = 9
+        with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_CONTROL_SETTLE_TIME + 2.1):
+            Phase2Handler().execute(ctrl, {"gps_fix_seq": 20, "angle_valid": True, "angle": 90.0})
 
         self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE3))
         self.assertTrue(ctrl.st.values["bno_offset_valid"])
@@ -209,7 +224,7 @@ class Phase2FlowTest(unittest.TestCase):
         self.assertFalse(estimate["valid"])
         self.assertEqual(estimate["reason"], "bno_heading_unstable")
 
-    def test_rejected_segment_requests_compact_turnaround(self):
+    def test_rejected_segment_requests_forward_reorient(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
         ctrl.phase2_offset_reference_bno_deg = 270.0
@@ -221,27 +236,27 @@ class Phase2FlowTest(unittest.TestCase):
                     "lat": 35.0 + index * 0.000012,
                     "lng": 139.0,
                     "angle_valid": True,
-                    "angle": 250.0 if index % 2 == 0 else 290.0,
+                    "angle": 270.0,
                 },
             )
 
+        Phase2Handler._begin_offset_retry(ctrl, 10.0, "bno_heading_unstable")
         self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
-        self.assertIsNotNone(ctrl.phase2_offset_turn_target_deg)
+        self.assertIsNone(ctrl.phase2_offset_turn_target_deg)
 
-    def test_repeated_offset_timeout_keeps_retrying_in_phase2(self):
+    def test_repeated_offset_timeout_stops_after_retry_budget(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
         ctrl.phase2_offset_stage_retry_count = 7
 
         with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_LEG_MAX_TIME + 0.1):
-            Phase2Handler().execute(ctrl, {"gps_fix_seq": 20})
+            Phase2Handler().execute(ctrl, {"gps_fix_seq": 20, "angle_valid": True, "angle": 90.0})
 
-        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE2))
-        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE7))
         self.assertEqual(ctrl.phase2_offset_stage_retry_count, 8)
-        self.assertEqual(ctrl.mission_end_reason, "RUNNING")
+        self.assertEqual(ctrl.mission_end_reason, "PHASE2_OFFSET_FAILED")
 
-    def test_first_offset_timeout_retries_with_turnaround(self):
+    def test_first_offset_timeout_retries_with_forward_reorient(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
 
@@ -255,11 +270,54 @@ class Phase2FlowTest(unittest.TestCase):
         self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
         self.assertEqual(ctrl.phase2_offset_stage_retry_count, 1)
 
-    def test_turnaround_time_does_not_consume_next_straight_leg(self):
+    def test_near_goal_extends_leg_deadline_without_lowering_five_meter_requirement(self):
+        ctrl = _Controller()
+        ctrl.phase2_offset_distance_m = 4.1
+
+        self.assertFalse(Phase2Handler._offset_progress_stalled(ctrl, 24.9))
+        self.assertTrue(ctrl.phase2_offset_near_goal_active)
+        self.assertEqual(
+            ctrl.phase2_offset_leg_time_limit_sec,
+            PHASE2_OFFSET_LEG_MAX_TIME + PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC,
+        )
+        self.assertFalse(ctrl.bno_heading_offset_valid)
+
+    def test_near_goal_small_progress_refreshes_stall_window(self):
+        ctrl = _Controller()
+        ctrl.phase2_offset_distance_m = 4.1
+        self.assertFalse(Phase2Handler._offset_progress_stalled(ctrl, 20.0))
+
+        ctrl.phase2_offset_distance_m = 4.21
+        self.assertFalse(Phase2Handler._offset_progress_stalled(ctrl, 24.9))
+        self.assertFalse(Phase2Handler._offset_progress_stalled(ctrl, 29.8))
+        self.assertTrue(Phase2Handler._offset_progress_stalled(ctrl, 30.0))
+
+    def test_near_goal_grace_has_hard_ten_second_cap(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_near_goal_active = True
+        ctrl.phase2_offset_distance_m = 4.8
+        ctrl.phase2_offset_leg_time_limit_sec = (
+            PHASE2_OFFSET_LEG_MAX_TIME + PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC
+        )
+        ctrl.phase2_offset_progress_anchor_time = PHASE2_OFFSET_LEG_MAX_TIME + 9.0
+        ctrl.phase2_offset_progress_anchor_distance_m = 4.7
+
+        now = PHASE2_OFFSET_LEG_MAX_TIME + PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC + 0.1
+        with patch("mission.phases.p2.time.time", return_value=now):
+            Phase2Handler().execute(
+                ctrl,
+                {"gps_fix_seq": 20, "angle_valid": True, "angle": 90.0},
+            )
+
+        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertEqual(ctrl.phase2_offset_stage_retry_count, 1)
+
+    def test_reorient_time_does_not_consume_next_straight_leg(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
         ctrl.phase2_offset_mode = PHASE2_OFFSET_MODE_TURNAROUND
-        ctrl.phase2_offset_turn_target_deg = 180.0
+        ctrl.phase2_offset_mode_start_time = 96.0
         ctrl.phase2_offset_stage_retry_count = 2
 
         with patch("mission.phases.p2.time.time", return_value=100.0):
@@ -268,7 +326,7 @@ class Phase2FlowTest(unittest.TestCase):
                 {"gps_fix_seq": 20, "angle_valid": True, "angle": 0.0},
             )
 
-        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
+        self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_COLLECT)
         self.assertEqual(ctrl.phase2_offset_stage_retry_count, 2)
 
     def test_bno_recovery_restarts_offset_reference_and_samples(self):

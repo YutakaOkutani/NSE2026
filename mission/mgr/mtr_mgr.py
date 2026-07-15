@@ -47,11 +47,16 @@ from mission.const import (
     PHASE2_OFFSET_HOLD_DEADBAND_DEG,
     PHASE2_OFFSET_HOLD_KP,
     PHASE2_OFFSET_HOLD_MAX_DELTA,
-    PHASE2_OFFSET_MODE_TURNAROUND,
+    PHASE2_OFFSET_MODE_REORIENT,
+    PHASE2_OFFSET_MODE_BNO_WAIT,
+    PHASE2_OFFSET_MODE_READINESS,
     PHASE2_OFFSET_SPEED,
-    PHASE2_OFFSET_TURN_DEADBAND_DEG,
-    PHASE2_OFFSET_TURN_SPEED,
-    PHASE2_CALIB_ROTATE_SPEED,
+    PHASE2_FORWARD_REORIENT_INNER_SPEED,
+    PHASE2_FORWARD_REORIENT_OUTER_SPEED,
+    PHASE2_CALIB_ARC_INNER_SPEED,
+    PHASE2_CALIB_ARC_INTERVAL_SEC,
+    PHASE2_CALIB_ARC_OUTER_SPEED,
+    PHASE2_OFFSET_CORRECTION_BASE_SPEED,
     PHASE2_STAGE_CALIBRATION,
     PHASE2_STAGE_ESCAPE,
     PHASE2_STAGE_OFFSET,
@@ -71,6 +76,7 @@ from mission.const import (
     PHASE3_MAG_STUCK_MIN_DELTA_DEG,
     PHASE3_MAG_STUCK_TIMEOUT_SEC,
     PHASE3_MOTOR_LOOP_INTERVAL,
+    PHASE3_NO_HEADING_TIMEOUT_SEC,
     PHASE3_TURN_RAMP_TIME,
     PHASE3_TURN_INNER_SPEED,
     PHASE3_TURN_OUTER_SPEED,
@@ -117,10 +123,11 @@ class MotorManager:
 
         error = self._angle_diff_deg(reference, angle)
         self.phase2_offset_heading_error_deg = error
-        base = self._clamp_percent(PHASE2_OFFSET_SPEED)
+        straight = self._clamp_percent(PHASE2_OFFSET_SPEED)
         if abs(error) <= float(PHASE2_OFFSET_HOLD_DEADBAND_DEG):
-            return base, base, error
+            return straight, straight, error
 
+        base = self._clamp_percent(PHASE2_OFFSET_CORRECTION_BASE_SPEED)
         delta = min(
             float(PHASE2_OFFSET_HOLD_MAX_DELTA),
             abs(error) * float(PHASE2_OFFSET_HOLD_KP),
@@ -132,50 +139,28 @@ class MotorManager:
         return slow, fast, error
 
     def _phase2_calibration_pattern(self, elapsed):
-        rotate_speed = self._clamp_percent(PHASE2_CALIB_ROTATE_SPEED)
-        left_turn = int(float(elapsed) // PHASE2_TURN_INTERVAL) % 2 == 0
+        outer = self._clamp_percent(PHASE2_CALIB_ARC_OUTER_SPEED)
+        inner = self._clamp_percent(PHASE2_CALIB_ARC_INNER_SPEED)
+        left_turn = int(float(elapsed) // PHASE2_CALIB_ARC_INTERVAL_SEC) % 2 == 0
         if left_turn:
-            return rotate_speed, False, rotate_speed, True
-        return rotate_speed, True, rotate_speed, False
+            return inner, True, outer, True
+        return outer, True, inner, True
 
-    def _drive_phase2_offset_turnaround(self, snapshot):
-        target = getattr(self, "phase2_offset_turn_target_deg", None)
-        if target is None or not snapshot.get("angle_valid", False):
-            self.stop_motors()
-            return
-        try:
-            target = float(target) % 360.0
-            angle = float(snapshot.get("angle")) % 360.0
-        except (TypeError, ValueError):
-            self.stop_motors()
-            return
-        if not math.isfinite(target) or not math.isfinite(angle):
-            self.stop_motors()
-            return
-
-        error = self._angle_diff_deg(target, angle)
-        self.phase2_offset_heading_error_deg = error
-        if abs(error) <= float(PHASE2_OFFSET_TURN_DEADBAND_DEG):
-            self.stop_motors()
-            return
-        speed = self._clamp_percent(PHASE2_OFFSET_TURN_SPEED)
-        if error > 0.0:
+    def _drive_phase2_forward_reorient(self):
+        outer = self._clamp_percent(PHASE2_FORWARD_REORIENT_OUTER_SPEED)
+        inner = self._clamp_percent(PHASE2_FORWARD_REORIENT_INNER_SPEED)
+        retry = int(getattr(self, "phase2_offset_stage_retry_count", 0))
+        if retry % 2:
             self.set_motors(
-                speed,
-                True,
-                speed,
-                False,
+                inner, True, outer, True,
                 ramp_time=PHASE2_RAMP_TIME,
-                cmd_type="phase2_offset_turnaround_right",
+                cmd_type="phase2_offset_forward_reorient_left",
             )
         else:
             self.set_motors(
-                speed,
-                False,
-                speed,
-                True,
+                outer, True, inner, True,
                 ramp_time=PHASE2_RAMP_TIME,
-                cmd_type="phase2_offset_turnaround_left",
+                cmd_type="phase2_offset_forward_reorient_right",
             )
 
     def _set_forward_pivot_turn(
@@ -452,8 +437,11 @@ class MotorManager:
                         cmd_type="phase2_escape_forward",
                     )
                 elif self.phase2_stage == PHASE2_STAGE_OFFSET:
-                    if getattr(self, "phase2_offset_mode", "") == PHASE2_OFFSET_MODE_TURNAROUND:
-                        self._drive_phase2_offset_turnaround(snapshot)
+                    offset_mode = getattr(self, "phase2_offset_mode", "")
+                    if offset_mode == PHASE2_OFFSET_MODE_REORIENT:
+                        self._drive_phase2_forward_reorient()
+                    elif offset_mode in (PHASE2_OFFSET_MODE_BNO_WAIT, PHASE2_OFFSET_MODE_READINESS):
+                        self.stop_motors()
                     else:
                         hold = self._phase2_offset_hold_speeds(snapshot)
                         if hold is None:
@@ -486,7 +474,7 @@ class MotorManager:
                         speed_r,
                         motor2_forward,
                         ramp_time=PHASE2_RAMP_TIME,
-                        cmd_type="phase2_calibration_compact_turn",
+                        cmd_type="phase2_calibration_forward_arc",
                     )
                 else:
                     self.stop_motors()
@@ -494,6 +482,10 @@ class MotorManager:
                 continue
 
             if phase == Phase.PHASE3:
+                if not bool(getattr(self, "phase3_heading_entry_ready", False)):
+                    self.stop_motors()
+                    time.sleep(MOTOR_IDLE_SLEEP)
+                    continue
                 target_heading = direction
                 nav_heading, heading_source = self._phase3_heading(snapshot)
                 if nav_heading is not None:
@@ -547,17 +539,11 @@ class MotorManager:
                 else:
                     if self.phase3_no_heading_start is None:
                         self.phase3_no_heading_start = time.time()
-                    # Legacy Phase3 was straight-dominant; alternating left/right search here
-                    # creates the large S-curves seen in recent logs.
-                    base = self._clamp_percent(PHASE3_FORWARD_SPEED)
-                    self.set_motors(
-                        base,
-                        True,
-                        base,
-                        True,
-                        ramp_time=PHASE3_FORWARD_RAMP_TIME,
-                        cmd_type="phase3_no_heading_forward",
-                    )
+                    # Blind forward motion moved the rover away from the goal in field logs.
+                    self.stop_motors()
+                    if time.time() - self.phase3_no_heading_start >= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
+                        self.mission_end_reason = "PHASE3_HEADING_LOST"
+                        self.st.update_navigation(phase=int(Phase.PHASE7))
             elif phase == Phase.PHASE4:
                 # Phase4 is camera-only: keep all turning forward-only to avoid reverse torque.
                 cone_prob = snapshot.get("cone_probability", 0.0)

@@ -32,6 +32,11 @@ class Phase3Handler(BasePhaseHandler):
         led_green = controller.devices.get(DEVICE_LED_GREEN)
         if led_red:
             led_red.off()
+        if not bool(getattr(controller, "phase3_heading_entry_ready", False)):
+            print("Phase3 entry rejected: BNO_ALIGNED quality is not ready -> Phase7")
+            controller.mission_end_reason = "PHASE3_ENTRY_HEADING_UNREADY"
+            controller.st.update_navigation(phase=int(Phase.PHASE7))
+            return
         controller.toggle_led(led_green, controller.led_blink_timer, interval=LED_INTERVAL_PHASE3)
         if time.time() - controller.time_phase3_start > TIMEOUT_PHASE_3:
             print("Phase3 TIMEOUT: switching to Phase4")

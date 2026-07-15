@@ -35,6 +35,7 @@ from mission.const import (
     MISSION_TIMEOUT_TOTAL,
     PHASE3_BNO_GPS_OFFSET_ALPHA,
     PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG,
+    PHASE2_OFFSET_LEG_MAX_TIME,
     PHASE2_STAGE_ESCAPE,
     PHASE2_OFFSET_MODE_COLLECT,
     Phase,
@@ -94,6 +95,15 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.searching_flag = False
         self.count_cone_lost = 0
         self.time_phase1_start = None
+        self.phase1_offset_samples = []
+        self.phase1_offset_last_gps_fix_seq = 0
+        self.phase1_offset_candidate_valid = False
+        self.phase1_offset_candidate_deg = 0.0
+        self.phase1_offset_distance_m = 0.0
+        self.phase1_offset_path_efficiency = 0.0
+        self.phase1_offset_bno_spread_deg = 0.0
+        self.phase1_offset_subsegment_diff_deg = 0.0
+        self.phase1_offset_reject_reason = ""
         self.phase0_entry_marker = None
         self.phase0_initial_alt = None
         self.phase0_drop_detect_time = None
@@ -158,8 +168,17 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase2_offset_stage_retry_count = 0
         self.phase2_offset_settle_until = 0.0
         self.phase2_offset_leg_start_time = 0.0
+        self.phase2_offset_progress_anchor_time = 0.0
+        self.phase2_offset_progress_anchor_distance_m = 0.0
+        self.phase2_offset_near_goal_active = False
+        self.phase2_offset_leg_time_limit_sec = PHASE2_OFFSET_LEG_MAX_TIME
         self.phase2_offset_observed_bno_recovery_seq = 0
         self.phase2_offset_reject_reason = ""
+        self.phase2_offset_mode_start_time = 0.0
+        self.phase2_entry_ready_count = 0
+        self.phase2_heading_quality_valid = False
+        self.phase2_last_bno_recovery_time = 0.0
+        self.phase3_heading_entry_ready = False
         self.roi_img = None
         self.camera_fail_count = 0
         self.camera_last_reinit = 0.0
@@ -339,7 +358,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if current_phase == Phase.PHASE2:
             if getattr(self, "phase3_arrived_latched", False):
                 next_phase = Phase.PHASE4
-            elif not getattr(self, "bno_heading_offset_valid", False):
+            elif not getattr(self, "phase3_heading_entry_ready", False):
                 next_phase = Phase.PHASE7
                 self.mission_end_reason = "PHASE2_OFFSET_FAILED"
         print(

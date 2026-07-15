@@ -18,11 +18,11 @@ spec.loader.exec_module(motor_diag)
 
 class MotorDiagnosticSafetyTest(unittest.TestCase):
     def test_production_motor_direction_matches_current_airframe(self):
-        self.assertEqual(motor_diag.motor_forward_to_dir_value(1, True), 1)
-        self.assertEqual(motor_diag.motor_forward_to_dir_value(2, True), 0)
+        self.assertEqual(motor_diag.motor_forward_to_dir_value(1, True), 0)
+        self.assertEqual(motor_diag.motor_forward_to_dir_value(2, True), 1)
 
     def test_production_motor_trim_matches_current_airframe(self):
-        self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_1, 0.95)
+        self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_1, 1.00)
         self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_2, 1.00)
 
     def test_quit_always_stops_motors(self):

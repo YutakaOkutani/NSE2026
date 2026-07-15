@@ -22,16 +22,28 @@ from mission.const import (
     PHASE2_CALIB_STABLE_SEC,
     PHASE2_ESCAPE_TIME,
     PHASE2_OFFSET_CONTROL_SETTLE_TIME,
+    PHASE2_BNO_WAIT_TIMEOUT,
+    PHASE2_ENTRY_READY_CONFIRM_COUNT,
+    PHASE2_ENTRY_RECOVERY_QUIET_SEC,
+    PHASE2_FORWARD_REORIENT_TIME,
     PHASE2_OFFSET_LEG_MAX_TIME,
     PHASE2_OFFSET_MAX_BNO_SPREAD_DEG,
+    PHASE2_OFFSET_MAX_RETRIES,
+    PHASE2_OFFSET_MAX_SAMPLE_HEADING_ERROR_DEG,
     PHASE2_OFFSET_MAX_SUBSEGMENT_DIFF_DEG,
     PHASE2_OFFSET_MIN_DISTANCE_M,
+    PHASE2_OFFSET_MIN_PROGRESS_M,
+    PHASE2_OFFSET_NEAR_GOAL_DISTANCE_M,
+    PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC,
+    PHASE2_OFFSET_NEAR_GOAL_MIN_PROGRESS_M,
     PHASE2_OFFSET_MIN_PATH_EFFICIENCY,
     PHASE2_OFFSET_MIN_SAMPLES,
+    PHASE2_OFFSET_PROGRESS_WINDOW_SEC,
     PHASE2_OFFSET_MODE_COLLECT,
-    PHASE2_OFFSET_MODE_TURNAROUND,
-    PHASE2_OFFSET_TURN_CONFIRM_COUNT,
-    PHASE2_OFFSET_TURN_DEADBAND_DEG,
+    PHASE2_OFFSET_MODE_BNO_WAIT,
+    PHASE2_OFFSET_MODE_READINESS,
+    PHASE2_OFFSET_MODE_REORIENT,
+    PHASE3_BNO_TRUST_MAX_STALE_SEC,
     PHASE2_STAGE_CALIBRATION,
     PHASE2_STAGE_ESCAPE,
     PHASE2_STAGE_OFFSET,
@@ -185,7 +197,12 @@ class Phase2Handler(BasePhaseHandler):
         controller.bno_heading_offset_candidate_deg = None
         controller.bno_heading_offset_candidate_count = 0
         controller.phase2_offset_settle_until = now + float(PHASE2_OFFSET_CONTROL_SETTLE_TIME)
-        controller.phase2_offset_leg_start_time = now
+        # Settling is not part of the distance-collection time budget.
+        controller.phase2_offset_leg_start_time = controller.phase2_offset_settle_until
+        controller.phase2_offset_progress_anchor_time = controller.phase2_offset_leg_start_time
+        controller.phase2_offset_progress_anchor_distance_m = 0.0
+        controller.phase2_offset_near_goal_active = False
+        controller.phase2_offset_leg_time_limit_sec = float(PHASE2_OFFSET_LEG_MAX_TIME)
         controller.phase2_offset_reject_reason = reason
         try:
             gps_fix_seq = int(snapshot.get("gps_fix_seq", 0))
@@ -198,21 +215,53 @@ class Phase2Handler(BasePhaseHandler):
         )
 
     @classmethod
-    def _begin_offset_turnaround(cls, controller, snapshot, reason):
-        heading = (
-            cls._normalize_heading(snapshot.get("angle"))
-            if snapshot.get("angle_valid", False)
-            else None
-        )
-        controller.phase2_offset_mode = PHASE2_OFFSET_MODE_TURNAROUND
-        controller.phase2_offset_turn_target_deg = (
-            (heading + 180.0) % 360.0 if heading is not None else None
-        )
-        controller.phase2_offset_turn_confirm_count = 0
+    def _begin_offset_retry(cls, controller, now, reason):
+        controller.phase2_offset_stage_retry_count += 1
+        controller.phase2_offset_attempt_count += 1
+        if controller.phase2_offset_stage_retry_count > int(PHASE2_OFFSET_MAX_RETRIES):
+            controller.phase2_offset_reject_reason = f"retry_exhausted:{reason}"
+            controller.mission_end_reason = "PHASE2_OFFSET_FAILED"
+            controller.st.update_navigation(phase=int(Phase.PHASE7))
+            return
+        controller.phase2_offset_mode = PHASE2_OFFSET_MODE_REORIENT
+        controller.phase2_offset_mode_start_time = now
+        controller.phase2_offset_turn_target_deg = None
         controller.phase2_offset_samples = []
         controller.phase2_offset_distance_m = 0.0
         controller.bno_heading_offset_candidate_count = 0
-        controller.phase2_offset_reject_reason = f"turnaround:{reason}"
+        controller.phase2_offset_reject_reason = f"forward_reorient:{reason}"
+
+    @staticmethod
+    def _offset_progress_stalled(controller, now):
+        distance_m = float(getattr(controller, "phase2_offset_distance_m", 0.0))
+        near_goal = bool(getattr(controller, "phase2_offset_near_goal_active", False))
+        if not near_goal and distance_m >= float(PHASE2_OFFSET_NEAR_GOAL_DISTANCE_M):
+            near_goal = True
+            controller.phase2_offset_near_goal_active = True
+            controller.phase2_offset_leg_time_limit_sec = (
+                float(PHASE2_OFFSET_LEG_MAX_TIME) + float(PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC)
+            )
+            # Start a finer progress window on entry. The 0.5 m normal-leg
+            # requirement is too coarse when less than 1 m remains.
+            controller.phase2_offset_progress_anchor_time = now
+            controller.phase2_offset_progress_anchor_distance_m = distance_m
+
+        min_progress_m = (
+            float(PHASE2_OFFSET_NEAR_GOAL_MIN_PROGRESS_M)
+            if near_goal
+            else float(PHASE2_OFFSET_MIN_PROGRESS_M)
+        )
+        anchor_distance = float(
+            getattr(controller, "phase2_offset_progress_anchor_distance_m", 0.0)
+        )
+        if distance_m - anchor_distance >= min_progress_m:
+            controller.phase2_offset_progress_anchor_distance_m = distance_m
+            controller.phase2_offset_progress_anchor_time = now
+
+        progress_elapsed = now - float(
+            getattr(controller, "phase2_offset_progress_anchor_time", now)
+        )
+        return progress_elapsed >= float(PHASE2_OFFSET_PROGRESS_WINDOW_SEC)
 
     @classmethod
     def _update_phase2_goal(cls, controller, snapshot, now):
@@ -290,6 +339,8 @@ class Phase2Handler(BasePhaseHandler):
         except (TypeError, ValueError):
             return
         bno_heading = cls._normalize_heading(snapshot.get("angle"))
+        heading_error = cls._angle_diff(reference, bno_heading) if bno_heading is not None else 180.0
+        controller.phase2_offset_heading_error_deg = heading_error
         if (
             gps_fix_seq <= int(getattr(controller, "phase2_offset_last_gps_fix_seq", 0))
             or gps_fix_seq <= 0
@@ -297,7 +348,10 @@ class Phase2Handler(BasePhaseHandler):
             or not math.isfinite(lat)
             or not math.isfinite(lng)
             or (lat == 0.0 and lng == 0.0)
+            or abs(heading_error) > float(PHASE2_OFFSET_MAX_SAMPLE_HEADING_ERROR_DEG)
         ):
+            if abs(heading_error) > float(PHASE2_OFFSET_MAX_SAMPLE_HEADING_ERROR_DEG):
+                controller.phase2_offset_reject_reason = "heading_not_straight"
             return
 
         controller.phase2_offset_last_gps_fix_seq = gps_fix_seq
@@ -337,10 +391,10 @@ class Phase2Handler(BasePhaseHandler):
         if estimate["valid"]:
             controller.bno_heading_offset_deg = estimate["offset_deg"]
             controller.bno_heading_offset_valid = True
+            controller.phase2_heading_quality_valid = True
             return
 
-        controller.phase2_offset_attempt_count += 1
-        cls._begin_offset_turnaround(controller, snapshot, estimate["reason"])
+        cls._begin_offset_retry(controller, time.time(), estimate["reason"])
 
     @staticmethod
     def _enter_stage(controller, stage, now, snapshot=None):
@@ -359,6 +413,10 @@ class Phase2Handler(BasePhaseHandler):
             snapshot = {}
         controller.phase2_offset_attempt_count = 0
         controller.phase2_offset_stage_retry_count = 0
+        controller.phase2_offset_mode_start_time = now
+        controller.phase2_entry_ready_count = 0
+        controller.phase2_heading_quality_valid = False
+        controller.phase2_last_bno_recovery_time = now
         Phase2Handler._reset_offset_collection(controller, snapshot, now, "settling")
 
     def execute(self, controller, snapshot):
@@ -426,31 +484,54 @@ class Phase2Handler(BasePhaseHandler):
             )
             if recovery_seq != observed_recovery_seq:
                 print("Phase2: BNO heading recovered; restarting offset segment")
+                controller.phase2_last_bno_recovery_time = now
                 self._reset_offset_collection(controller, snapshot, now, "bno_recovered_reset")
 
-            if controller.phase2_offset_mode == PHASE2_OFFSET_MODE_TURNAROUND:
-                target = self._normalize_heading(controller.phase2_offset_turn_target_deg)
-                angle = (
-                    self._normalize_heading(snapshot.get("angle"))
-                    if snapshot.get("angle_valid", False)
-                    else None
+            mode = controller.phase2_offset_mode
+            if mode == PHASE2_OFFSET_MODE_REORIENT:
+                mode_elapsed = now - float(getattr(controller, "phase2_offset_mode_start_time", now))
+                if mode_elapsed >= float(PHASE2_FORWARD_REORIENT_TIME):
+                    self._reset_offset_collection(controller, snapshot, now, "settling_after_reorient")
+                return
+
+            if mode == PHASE2_OFFSET_MODE_BNO_WAIT:
+                wait_elapsed = now - float(getattr(controller, "phase2_offset_mode_start_time", now))
+                if snapshot.get("angle_valid", False):
+                    self._reset_offset_collection(controller, snapshot, now, "settling_after_bno_wait")
+                elif wait_elapsed >= float(PHASE2_BNO_WAIT_TIMEOUT):
+                    self._begin_offset_retry(controller, now, "bno_unavailable")
+                return
+
+            if mode == PHASE2_OFFSET_MODE_READINESS:
+                controller.st.update_navigation(
+                    bno_offset_deg=float(controller.bno_heading_offset_deg),
+                    bno_offset_valid=bool(controller.bno_heading_offset_valid),
                 )
-                if target is None and angle is not None:
-                    target = (angle + 180.0) % 360.0
-                    controller.phase2_offset_turn_target_deg = target
-                if target is not None and angle is not None:
-                    turn_error = self._angle_diff(target, angle)
-                    controller.phase2_offset_heading_error_deg = turn_error
-                    if abs(turn_error) <= float(PHASE2_OFFSET_TURN_DEADBAND_DEG):
-                        controller.phase2_offset_turn_confirm_count += 1
-                    else:
-                        controller.phase2_offset_turn_confirm_count = 0
-                    if controller.phase2_offset_turn_confirm_count >= int(
-                        PHASE2_OFFSET_TURN_CONFIRM_COUNT
-                    ):
-                        self._reset_offset_collection(
-                            controller, snapshot, now, "settling_after_turnaround"
-                        )
+                stale = float(getattr(controller, "bno_stale_sec", 999.0))
+                recovery_quiet = now - float(getattr(controller, "phase2_last_bno_recovery_time", now))
+                trusted = (
+                    bool(getattr(controller, "phase2_heading_quality_valid", False))
+                    and bool(snapshot.get("angle_valid", False))
+                    and stale <= float(PHASE3_BNO_TRUST_MAX_STALE_SEC)
+                )
+                if trusted and hasattr(controller, "_phase3_bno_trusted"):
+                    trusted = bool(controller._phase3_bno_trusted(snapshot, snapshot.get("angle")))
+                if trusted and recovery_quiet >= float(PHASE2_ENTRY_RECOVERY_QUIET_SEC):
+                    controller.phase2_entry_ready_count += 1
+                else:
+                    controller.phase2_entry_ready_count = 0
+                if controller.phase2_entry_ready_count >= int(PHASE2_ENTRY_READY_CONFIRM_COUNT):
+                    controller.phase3_heading_entry_ready = True
+                    controller.st.update_navigation(phase=int(Phase.PHASE3))
+                    controller.time_phase3_start = now
+                    print("Phase2: BNO_ALIGNED readiness confirmed -> Phase3")
+                return
+
+            if not snapshot.get("angle_valid", False):
+                controller.phase2_offset_mode = PHASE2_OFFSET_MODE_BNO_WAIT
+                controller.phase2_offset_mode_start_time = now
+                controller.phase2_offset_reject_reason = "bno_wait"
+                return
 
             if (
                 getattr(controller, "phase2_offset_reference_bno_deg", None) is None
@@ -464,6 +545,17 @@ class Phase2Handler(BasePhaseHandler):
                 if controller.phase2_offset_reject_reason.startswith("settling"):
                     controller.phase2_offset_reject_reason = ""
                 self._update_offset_segment(controller, snapshot)
+                if (
+                    controller.phase2_offset_mode == PHASE2_OFFSET_MODE_COLLECT
+                    and self._offset_progress_stalled(controller, now)
+                ):
+                    reason = (
+                        "gps_near_goal_stalled"
+                        if controller.phase2_offset_near_goal_active
+                        else "gps_progress_stalled"
+                    )
+                    self._begin_offset_retry(controller, now, reason)
+                    return
             controller.st.update_navigation(
                 bno_offset_deg=float(controller.bno_heading_offset_deg),
                 bno_offset_valid=bool(controller.bno_heading_offset_valid),
@@ -474,24 +566,31 @@ class Phase2Handler(BasePhaseHandler):
             )
             offset_timed_out = (
                 controller.phase2_offset_mode == PHASE2_OFFSET_MODE_COLLECT
-                and offset_leg_elapsed >= float(PHASE2_OFFSET_LEG_MAX_TIME)
+                and offset_leg_elapsed
+                >= float(
+                    getattr(
+                        controller,
+                        "phase2_offset_leg_time_limit_sec",
+                        PHASE2_OFFSET_LEG_MAX_TIME,
+                    )
+                )
             )
             if offset_complete or offset_timed_out:
                 if offset_complete:
                     print(
                         "Phase2: BNO/GPS offset learned "
-                        f"({controller.bno_heading_offset_deg:.1f} deg) -> Phase3"
+                        f"({controller.bno_heading_offset_deg:.1f} deg) -> readiness check"
                     )
+                    controller.phase2_offset_mode = PHASE2_OFFSET_MODE_READINESS
+                    controller.phase2_offset_mode_start_time = now
+                    controller.phase2_entry_ready_count = 0
                 else:
-                    controller.phase2_offset_stage_retry_count += 1
-                    self._begin_offset_turnaround(controller, snapshot, "leg_timeout")
+                    self._begin_offset_retry(controller, now, "leg_timeout")
                     print(
-                        "Phase2: offset leg time limit -> compact turnaround retry "
+                        "Phase2: offset leg time limit -> forward reorient retry "
                         f"#{controller.phase2_offset_stage_retry_count}"
                     )
-                    return
-                controller.st.update_navigation(phase=int(Phase.PHASE3))
-                controller.time_phase3_start = now
+                return
             return
 
         print(f"Phase2: unknown stage {controller.phase2_stage!r}; restarting escape stage")
@@ -506,3 +605,5 @@ def run_standalone():
 
 if __name__ == "__main__":
     run_standalone()
+    PHASE2_OFFSET_MAX_RETRIES,
+    PHASE2_OFFSET_MAX_SAMPLE_HEADING_ERROR_DEG,

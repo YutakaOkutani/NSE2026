@@ -34,3 +34,7 @@ __pycache__/
 # generated from D2
 *.svg
 *.pdf
+
+# formerly settings
+/machine.txt
+/mission.env

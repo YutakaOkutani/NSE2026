@@ -35,6 +35,7 @@ class _Phase3Controller:
         self.phase3_arrived_latched = False
         self.phase3_arrival_confirm_count = 0
         self.phase3_arrival_inside_since = None
+        self.phase3_heading_entry_ready = True
         self.st = _State(
             phase=int(Phase.PHASE3),
             lat=lat,

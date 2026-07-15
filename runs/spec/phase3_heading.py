@@ -60,27 +60,32 @@ class _HeadingOnlyController(MotorManager):
 
 
 class Phase3HeadingTest(unittest.TestCase):
-    def test_phase2_calibration_rotates_in_place_and_alternates(self):
+    def test_phase2_calibration_uses_forward_only_alternating_arcs(self):
         ctrl = _HeadingOnlyController()
 
         first = ctrl._phase2_calibration_pattern(0.0)
         second = ctrl._phase2_calibration_pattern(3.1)
 
-        self.assertEqual(first[0], first[2])
-        self.assertEqual(second[0], second[2])
-        self.assertEqual(first[1:], (False, first[2], True))
-        self.assertEqual(second[1:], (True, second[2], False))
+        self.assertNotEqual(first[0], first[2])
+        self.assertNotEqual(second[0], second[2])
+        self.assertTrue(first[1])
+        self.assertTrue(first[3])
+        self.assertTrue(second[1])
+        self.assertTrue(second[3])
+        self.assertEqual(first[0], second[2])
+        self.assertEqual(first[2], second[0])
 
-    def test_phase2_turnaround_uses_counter_rotation(self):
+    def test_phase2_reorient_uses_forward_only_arc(self):
         ctrl = _HeadingOnlyController()
-        ctrl.phase2_offset_turn_target_deg = 100.0
+        ctrl.phase2_offset_stage_retry_count = 1
 
-        ctrl._drive_phase2_offset_turnaround({"angle_valid": True, "angle": 90.0})
+        ctrl._drive_phase2_forward_reorient()
 
         args, kwargs = ctrl.motor_commands[-1]
         self.assertTrue(args[1])
-        self.assertFalse(args[3])
-        self.assertEqual(kwargs["cmd_type"], "phase2_offset_turnaround_right")
+        self.assertTrue(args[3])
+        self.assertNotEqual(args[0], args[2])
+        self.assertIn("forward_reorient", kwargs["cmd_type"])
 
     def test_phase2_offset_hold_steers_back_to_relative_bno_heading(self):
         ctrl = _HeadingOnlyController()
