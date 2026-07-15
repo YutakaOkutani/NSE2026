@@ -5,18 +5,27 @@
 ### ハードウェア
 
 * Raspberry Pi Zero 2 W
-* microSDカード（16GB以上あれば良い）
-* 電源（5V / 2.5A）（PCからのUSB給電でもよいが、不安定になるときがある）
-* PC
+* microSDカード（16GB以上、32GB推奨。信頼できるメーカーのClass 10／A1以上）
+* microSDカードリーダー（PCに内蔵されていない場合）
+* 5V / 2.5Aのmicro USB電源
+* Raspberry Pi Imagerを実行できるPC
 * モニター・キーボード・USBハブ（あると便利）
 * Mini HDMI ケーブル（モニター接続用）
+
+### トラブル対応用（任意）
+
+SSH接続できない場合の確認に使用する。
+
+* HDMI対応モニター
+* mini HDMI－HDMIケーブル、または変換アダプター
+* USBキーボード
+* micro USB OTG変換アダプター、またはUSBハブ
 
 ### ソフトウェア
 
 * Raspberry Pi Imager
-* Git
-* ターミナル
-* WSL2（Windowsユーザーは推奨）
+* SSHクライアント（Windows、macOS、Linuxの標準ターミナルで利用可能）
+* WSL2（WindowsでLinux環境を使用したい場合のみ）
 
 ---
 
@@ -433,7 +442,7 @@ python3 main.py
 
 ### 本番運用（systemd）
 
-`tmux` は手動起動して画面を見ながらデバッグする場合、`systemd` はSSH切断後も継続する本番運用に使用する。定義本体は [`deploy/systemd/`](deploy/systemd/) で管理する。
+`tmux` は手動起動して画面を見ながらデバッグする場合、`systemd` は異常終了時に再起動する必要がある本番運用に使用する。定義本体は [`deploy/systemd/`](deploy/systemd/) で管理する。
 
 各unitの役割は次のとおり。
 
@@ -561,6 +570,36 @@ git push -u origin main
 # 2回目以降
 git push
 ```
+
+#### Gitの状態をプロンプトに表示する（任意）
+
+[Starship](https://starship.rs/)を導入すると、現在のGitブランチや未コミットの変更をシェルプロンプトで確認でき、ブランチの取り違えや変更の見落としを減らせる。Raspberry Piの標準Bashでは、次のように導入する。
+
+```bash
+curl -sS https://starship.rs/install.sh | sh
+```
+
+`~/.bashrc`を開く。
+
+```bash
+nano ~/.bashrc
+```
+
+ファイルの末尾に次の1行を追加して保存する。
+
+```bash
+eval "$(starship init bash)"
+```
+
+nanoを終了したら、設定を反映する。
+
+```bash
+source ~/.bashrc
+```
+
+記号が正しく表示されない場合は、SSH接続元PCのターミナルにNerd Fontを設定する。
+
+Starshipはリモートリポジトリの更新を自動取得しない。更新前には、後述の手順どおり`git fetch origin`や`git pull --ff-only origin main`を実行する。
 
 #### ブランチの作成・切り替え
 
