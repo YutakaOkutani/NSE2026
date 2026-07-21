@@ -43,6 +43,8 @@ except Exception:
     GPS_MIN_SATELLITES = 4
     LOG_PREFIX = "robust_log_"
 
+from analysis.log_selector import find_latest_log, resolve_log_path
+
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
@@ -88,14 +90,8 @@ def ensure_runtime_dependencies() -> None:
         pd = _pd
 
 
-def find_latest_log() -> Path:
-    candidates: list[Path] = []
-    search_root = REPO_ROOT / "analysis" / "robust_logs"
-    if search_root.exists():
-        candidates.extend(search_root.rglob(f"{LOG_PREFIX}*.csv"))
-    if not candidates:
-        raise FileNotFoundError(f"No robust_log_*.csv found in {search_root}")
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+# Kept for backward compatibility, delegated to log_selector.
+# (find_latest_log is imported from analysis.log_selector above)
 
 
 def prepare_output_dir(log_path: Path) -> Path:
@@ -712,7 +708,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Reconstruct CanSat explorer-style map from robust mission log."
     )
-    parser.add_argument("log_path", nargs="?", help="Path to robust_log_*.csv. Defaults to the latest log found.")
+    parser.add_argument(
+        "log_path",
+        nargs="?",
+        help="Path to robust_log_*.csv. Defaults to interactive selection or latest log.",
+    )
     parser.add_argument(
         "--camera-dir",
         type=Path,
@@ -742,7 +742,7 @@ def analyze_explorer_log(
     grid_size: int = 80,
 ) -> Path:
     ensure_runtime_dependencies()
-    log_path = Path(file_path).resolve() if file_path else find_latest_log()
+    log_path = resolve_log_path(file_path)
 
     raw_df = pd.read_csv(log_path)
     df = build_mission_dataframe(raw_df)

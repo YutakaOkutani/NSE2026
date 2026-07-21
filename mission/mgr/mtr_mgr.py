@@ -507,41 +507,31 @@ class MotorManager:
                             cmd_type="phase3_gps_forward",
                         )
                     else:
-                        turn_side = "right" if diff > 0 else "left"
-                        if abs(diff) >= PHASE3_LARGE_ERROR_DEG:
-                            fast_side = "left" if diff > 0 else "right"
-                            self._set_forward_diff_turn(
-                                fast_side,
-                                PHASE3_LARGE_ERROR_OUTER_SPEED,
-                                PHASE3_LARGE_ERROR_INNER_SPEED,
-                                cmd_type="phase3_gps_turn",
-                                ramp_time=PHASE3_TURN_RAMP_TIME,
-                            )
-                        elif diff > 0:
-                            # Positive diff must keep the pre-fix polarity used in field runs.
-                            # With our left/right motor mapping, left wheel faster steers right.
-                            self._set_forward_diff_turn(
-                                "left",
-                                turn_outer,
-                                turn_inner,
-                                cmd_type="phase3_gps_turn",
-                                ramp_time=PHASE3_TURN_RAMP_TIME,
-                            )
-                        else:
-                            # Mirror branch for opposite sign.
-                            self._set_forward_diff_turn(
-                                "right",
-                                turn_outer,
-                                turn_inner,
-                                cmd_type="phase3_gps_turn",
-                                ramp_time=PHASE3_TURN_RAMP_TIME,
-                            )
+                        fast_side = "left" if diff > 0 else "right"
+                        outer_speed = PHASE3_LARGE_ERROR_OUTER_SPEED if abs(diff) >= PHASE3_LARGE_ERROR_DEG else turn_outer
+                        inner_speed = PHASE3_LARGE_ERROR_INNER_SPEED if abs(diff) >= PHASE3_LARGE_ERROR_DEG else turn_inner
+                        self._set_forward_diff_turn(
+                            fast_side,
+                            outer_speed,
+                            inner_speed,
+                            cmd_type="phase3_gps_turn",
+                            ramp_time=PHASE3_TURN_RAMP_TIME,
+                        )
                 else:
                     if self.phase3_no_heading_start is None:
                         self.phase3_no_heading_start = time.time()
-                    # Blind forward motion moved the rover away from the goal in field logs.
-                    self.stop_motors()
-                    if time.time() - self.phase3_no_heading_start >= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
+                    elapsed_no_heading = time.time() - self.phase3_no_heading_start
+                    # Drive forward slowly during heading loss so GPS receives movement vectors to recover course
+                    slow_probe_speed = self._clamp_percent(PHASE3_FORWARD_SPEED * 0.5)
+                    self.set_motors(
+                        slow_probe_speed,
+                        True,
+                        slow_probe_speed,
+                        True,
+                        ramp_time=PHASE3_FORWARD_RAMP_TIME,
+                        cmd_type="phase3_no_heading_probe",
+                    )
+                    if elapsed_no_heading >= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
                         self.mission_end_reason = "PHASE3_HEADING_LOST"
                         self.st.update_navigation(phase=int(Phase.PHASE7))
             elif phase == Phase.PHASE4:

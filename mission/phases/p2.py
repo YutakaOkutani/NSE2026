@@ -605,5 +605,4 @@ def run_standalone():
 
 if __name__ == "__main__":
     run_standalone()
-    PHASE2_OFFSET_MAX_RETRIES,
-    PHASE2_OFFSET_MAX_SAMPLE_HEADING_ERROR_DEG,
+

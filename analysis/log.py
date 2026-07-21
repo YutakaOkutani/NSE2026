@@ -30,6 +30,8 @@ try:
 except Exception:
     LOG_HEADER = []
 
+from analysis.log_selector import find_latest_log, resolve_log_path
+
 COLUMN_GROUPS = [
     {
         "key": "time_and_phase",
@@ -177,13 +179,8 @@ def write_analysis_context(out_dir: Path, *, log_path: Path) -> None:
     (out_dir / "analysis_context.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
-def find_latest_log() -> Path:
-    target_dir = REPO_ROOT / "analysis" / "robust_logs"
-    candidates = list(target_dir.rglob("robust_log_*.csv")) if target_dir.exists() else []
-
-    if not candidates:
-        raise FileNotFoundError(f"No robust_log_*.csv found in {target_dir}")
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+# Kept for backward compatibility, delegated to log_selector.
+# (find_latest_log is imported from analysis.log_selector above)
 
 
 def prepare_output_dir(log_path: Path) -> Path:
@@ -653,7 +650,7 @@ def plot_trajectory(df: pd.DataFrame, out_dir: Path) -> None:
 
 
 def analyze_cansat_log(file_path: str | Path | None = None) -> Path:
-    log_path = Path(file_path).resolve() if file_path else find_latest_log()
+    log_path = resolve_log_path(file_path)
 
     df = pd.read_csv(log_path)
     df.attrs["source_path"] = str(log_path)
@@ -685,7 +682,11 @@ def analyze_cansat_log(file_path: str | Path | None = None) -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze CanSat robust mission log.")
-    parser.add_argument("log_path", nargs="?", help="Path to robust_log_*.csv. Defaults to the latest log found.")
+    parser.add_argument(
+        "log_path",
+        nargs="?",
+        help="Path to robust_log_*.csv. Defaults to interactive selection or latest log.",
+    )
     return parser.parse_args()
 
 
