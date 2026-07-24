@@ -408,6 +408,25 @@ class Phase2Handler(BasePhaseHandler):
             controller.phase2_heading_quality_valid = True
             return
 
+        offset_candidate = estimate.get("offset_deg")
+        if offset_candidate is not None:
+            controller.bno_heading_offset_deg = float(offset_candidate)
+            controller.bno_heading_offset_valid = True
+            controller.bno_heading_offset_verified = False
+            controller.phase2_heading_quality_valid = True
+            controller.phase3_heading_entry_ready = True
+            print(
+                f"Phase2: leg completed ({estimate.get('reason', 'best_effort')}) -> "
+                f"best-effort offset ({float(offset_candidate):.1f} deg) -> proceeding to Phase3"
+            )
+            controller.st.update_navigation(
+                phase=int(Phase.PHASE3),
+                bno_offset_deg=float(controller.bno_heading_offset_deg),
+                bno_offset_valid=True,
+            )
+            controller.time_phase3_start = time.time()
+            return
+
         cls._begin_offset_retry(controller, time.time(), estimate["reason"])
 
     @staticmethod

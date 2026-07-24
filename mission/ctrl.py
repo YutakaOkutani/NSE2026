@@ -507,6 +507,15 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
                 return False
         return True
 
+    def _coerce_speed(self, value):
+        try:
+            speed = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if not math.isfinite(speed):
+            return 0.0
+        return max(0.0, speed)
+
     def _update_bno_heading_offset_from_gps(self, snapshot):
         if not self._heading_offset_learning_ready(snapshot):
             return
