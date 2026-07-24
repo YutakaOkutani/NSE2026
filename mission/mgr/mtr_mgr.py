@@ -259,9 +259,14 @@ class MotorManager:
             self._phase3_last_heading_trust = 0.45
             return gps_heading, "GPS_PRIMARY"
 
-        if snapshot.get("angle_valid", False):
-            self._phase3_last_heading_trust = 0.0
-            return None, "BNO_UNTRUSTED"
+        if snapshot.get("angle_valid", False) and math.isfinite(angle):
+            offset = self._normalize_heading_deg(getattr(self, "bno_heading_offset_deg", 0.0))
+            if offset is None:
+                offset = 0.0
+            fallback_heading = self._normalize_heading_deg(angle + offset)
+            if fallback_heading is not None:
+                self._phase3_last_heading_trust = 0.25
+                return fallback_heading, "BNO_FALLBACK"
         if snapshot.get("gps_heading_valid", False):
             self._phase3_last_heading_trust = 0.0
             return None, "GPS_PARSE_FAIL"
@@ -532,8 +537,8 @@ class MotorManager:
                         cmd_type="phase3_no_heading_probe",
                     )
                     if elapsed_no_heading >= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
-                        self.mission_end_reason = "PHASE3_HEADING_LOST"
-                        self.st.update_navigation(phase=int(Phase.PHASE7))
+                        if self.led_blink_timer % 10 == 0:
+                            print("Phase3 warning: heading lost; continuing probe drive to recover course...")
             elif phase == Phase.PHASE4:
                 # Phase4 is camera-only: keep all turning forward-only to avoid reverse torque.
                 cone_prob = snapshot.get("cone_probability", 0.0)

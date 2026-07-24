@@ -18,6 +18,7 @@ from mission.const import (
     PHASE2_OFFSET_MODE_COLLECT,
     PHASE2_OFFSET_MODE_READINESS,
     PHASE2_OFFSET_MODE_TURNAROUND,
+    PHASE2_OFFSET_MAX_RETRIES,
     PHASE2_STAGE_CALIBRATION,
     PHASE2_STAGE_ESCAPE,
     PHASE2_STAGE_OFFSET,
@@ -244,17 +245,17 @@ class Phase2FlowTest(unittest.TestCase):
         self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
         self.assertIsNone(ctrl.phase2_offset_turn_target_deg)
 
-    def test_repeated_offset_timeout_stops_after_retry_budget(self):
+    def test_repeated_offset_timeout_falls_back_to_phase3(self):
         ctrl = _Controller()
         ctrl.phase2_stage = PHASE2_STAGE_OFFSET
-        ctrl.phase2_offset_stage_retry_count = 7
+        ctrl.phase2_offset_stage_retry_count = int(PHASE2_OFFSET_MAX_RETRIES)
 
         with patch("mission.phases.p2.time.time", return_value=PHASE2_OFFSET_LEG_MAX_TIME + 0.1):
             Phase2Handler().execute(ctrl, {"gps_fix_seq": 20, "angle_valid": True, "angle": 90.0})
 
-        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE7))
-        self.assertEqual(ctrl.phase2_offset_stage_retry_count, 8)
-        self.assertEqual(ctrl.mission_end_reason, "PHASE2_OFFSET_FAILED")
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE3))
+        self.assertTrue(ctrl.bno_heading_offset_valid)
+        self.assertTrue(ctrl.phase3_heading_entry_ready)
 
     def test_first_offset_timeout_retries_with_forward_reorient(self):
         ctrl = _Controller()

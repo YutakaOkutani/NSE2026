@@ -358,9 +358,15 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if current_phase == Phase.PHASE2:
             if getattr(self, "phase3_arrived_latched", False):
                 next_phase = Phase.PHASE4
-            elif not getattr(self, "phase3_heading_entry_ready", False):
-                next_phase = Phase.PHASE7
-                self.mission_end_reason = "PHASE2_OFFSET_FAILED"
+            else:
+                next_phase = Phase.PHASE3
+                if not getattr(self, "phase3_heading_entry_ready", False):
+                    fallback_offset = float(getattr(self, "bno_heading_offset_candidate_deg", 0.0) or 0.0)
+                    self.bno_heading_offset_deg = fallback_offset
+                    self.bno_heading_offset_valid = True
+                    self.phase2_heading_quality_valid = True
+                    self.phase3_heading_entry_ready = True
+                    print(f"Phase2 timeout: forcing Phase3 with fallback offset ({fallback_offset:.1f} deg)")
         print(
             f"{current_phase.name} cumulative timeout ({phase_elapsed:.1f}s / {phase_budget:.1f}s): "
             f"forcing {next_phase.name}"

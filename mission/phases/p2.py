@@ -219,9 +219,21 @@ class Phase2Handler(BasePhaseHandler):
         controller.phase2_offset_stage_retry_count += 1
         controller.phase2_offset_attempt_count += 1
         if controller.phase2_offset_stage_retry_count > int(PHASE2_OFFSET_MAX_RETRIES):
-            controller.phase2_offset_reject_reason = f"retry_exhausted:{reason}"
-            controller.mission_end_reason = "PHASE2_OFFSET_FAILED"
-            controller.st.update_navigation(phase=int(Phase.PHASE7))
+            fallback_offset = float(getattr(controller, "bno_heading_offset_candidate_deg", 0.0) or 0.0)
+            controller.bno_heading_offset_deg = fallback_offset
+            controller.bno_heading_offset_valid = True
+            controller.phase2_heading_quality_valid = True
+            controller.phase3_heading_entry_ready = True
+            controller.phase2_offset_reject_reason = f"retry_exhausted_fallback:{reason}"
+            print(
+                f"Phase2: retry limit reached ({reason}) -> fallback offset ({fallback_offset:.1f} deg) -> Phase3"
+            )
+            controller.st.update_navigation(
+                phase=int(Phase.PHASE3),
+                bno_offset_deg=float(controller.bno_heading_offset_deg),
+                bno_offset_valid=True,
+            )
+            controller.time_phase3_start = now
             return
         controller.phase2_offset_mode = PHASE2_OFFSET_MODE_REORIENT
         controller.phase2_offset_mode_start_time = now
