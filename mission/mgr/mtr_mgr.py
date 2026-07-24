@@ -77,6 +77,8 @@ from mission.const import (
     PHASE3_MAG_STUCK_TIMEOUT_SEC,
     PHASE3_MOTOR_LOOP_INTERVAL,
     PHASE3_NO_HEADING_TIMEOUT_SEC,
+    PHASE3_PIVOT_THRESHOLD_DEG,
+    PHASE3_PIVOT_SPEED,
     PHASE3_TURN_RAMP_TIME,
     PHASE3_TURN_INNER_SPEED,
     PHASE3_TURN_OUTER_SPEED,
@@ -375,270 +377,209 @@ class MotorManager:
             "motor1_speed": float(motor1_speed),
             "motor1_forward": int(bool(motor1_forward)),
             "motor2_speed": float(motor2_speed),
-            "motor2_forward": int(bool(motor2_forward)),
+        "motor2_forward": int(bool(motor2_forward)),
         }
 
     def move_motor_thread(self):
         while not self._shutdown_active():
-            snapshot = self.st.snapshot()
-            phase = Phase(snapshot["phase"])
-            obstacle_dist = snapshot["obstacle_dist"]
-            direction = snapshot["direction"]
-            cone_direction = snapshot["cone_direction"]
-            last_phase = getattr(self, "_motor_last_phase", None)
-            if last_phase != phase:
-                if phase not in (Phase.PHASE4, Phase.PHASE5) or last_phase not in (Phase.PHASE4, Phase.PHASE5):
-                    self._reset_phase45_camera_track()
-                self._motor_last_phase = phase
+            try:
+                snapshot = self.st.snapshot()
+                phase = Phase(snapshot["phase"])
+                obstacle_dist = snapshot["obstacle_dist"]
+                direction = snapshot["direction"]
+                cone_direction = snapshot["cone_direction"]
+                last_phase = getattr(self, "_motor_last_phase", None)
+                if last_phase != phase:
+                    if phase not in (Phase.PHASE4, Phase.PHASE5) or last_phase not in (Phase.PHASE4, Phase.PHASE5):
+                        self._reset_phase45_camera_track()
+                    self._motor_last_phase = phase
 
-            if phase in PHASES_STOP_MOTORS:
-                self.stop_motors()
-                time.sleep(MOTOR_IDLE_SLEEP)
-                continue
-
-            obstacle_detected = (
-                phase not in PHASES_SKIP_OBSTACLE
-                and bool(snapshot.get("obstacle_valid", False))
-                and obstacle_dist is not None
-                and 0 < obstacle_dist < OBSTACLE_AVOID_DIST
-            )
-            if obstacle_detected:
-                self.obstacle_detect_count += 1
-            else:
-                self.obstacle_detect_count = 0
-
-            if self.obstacle_detect_count >= OBSTACLE_CONFIRM_COUNT:
-                print(f"Obstacle Detected! {obstacle_dist:.1f}cm")
-                self.stop_motors()
-                time.sleep(OBSTACLE_PAUSE_TIME)
-                turn_fast = self._clamp_percent(OBSTACLE_SPEED)
-                turn_slow = self._clamp_percent(OBSTACLE_SPEED * 0.35)
-                self._set_forward_diff_turn("right", turn_fast, turn_slow, cmd_type="obstacle_forward_turn")
-                time.sleep(OBSTACLE_TURN_TIME)
-                self.stop_motors()
-                time.sleep(OBSTACLE_PAUSE_TIME)
-                self.obstacle_detect_count = 0
-                continue
-
-            if phase == Phase.PHASE1 and direction == PARACHUTE_DIRECTION:
-                self.set_motors(
-                    PARACHUTE_SEPARATION_SPEED,
-                    True,
-                    PARACHUTE_SEPARATION_SPEED,
-                    True,
-                    ramp_time=PHASE1_SOFTSTART_RAMP_TIME,
-                    step_interval=PHASE1_SOFTSTART_STEP,
-                    cmd_type="phase1_parachute_separation",
-                )
-                time.sleep(PARACHUTE_MOTOR_PULSE)
-                continue
-
-            if phase == Phase.PHASE2:
-                if self.phase2_stage == PHASE2_STAGE_ESCAPE:
-                    self.set_motors(
-                        PHASE2_SPEED,
-                        True,
-                        PHASE2_SPEED,
-                        True,
-                        ramp_time=PHASE2_RAMP_TIME,
-                        cmd_type="phase2_escape_forward",
-                    )
-                elif self.phase2_stage == PHASE2_STAGE_OFFSET:
-                    offset_mode = getattr(self, "phase2_offset_mode", "")
-                    if offset_mode == PHASE2_OFFSET_MODE_REORIENT:
-                        self._drive_phase2_forward_reorient()
-                    elif offset_mode in (PHASE2_OFFSET_MODE_BNO_WAIT, PHASE2_OFFSET_MODE_READINESS):
-                        self.stop_motors()
-                    else:
-                        hold = self._phase2_offset_hold_speeds(snapshot)
-                        if hold is None:
-                            self.stop_motors()
-                        else:
-                            speed_l, speed_r, heading_error = hold
-                            cmd_type = (
-                                "phase2_offset_heading_hold_straight"
-                                if abs(heading_error) <= float(PHASE2_OFFSET_HOLD_DEADBAND_DEG)
-                                else "phase2_offset_heading_hold"
-                            )
-                            self.set_motors(
-                                speed_l,
-                                True,
-                                speed_r,
-                                True,
-                                ramp_time=PHASE2_RAMP_TIME,
-                                cmd_type=cmd_type,
-                            )
-                elif self.phase2_stage == PHASE2_STAGE_CALIBRATION:
-                    elapsed = 0.0
-                    if self.phase2_stage_start is not None:
-                        elapsed = time.time() - self.phase2_stage_start
-                    speed_l, motor1_forward, speed_r, motor2_forward = (
-                        self._phase2_calibration_pattern(elapsed)
-                    )
-                    self.set_motors(
-                        speed_l,
-                        motor1_forward,
-                        speed_r,
-                        motor2_forward,
-                        ramp_time=PHASE2_RAMP_TIME,
-                        cmd_type="phase2_calibration_forward_arc",
-                    )
-                else:
-                    self.stop_motors()
-                time.sleep(MOTOR_LOOP_INTERVAL)
-                continue
-
-            if phase == Phase.PHASE3:
-                if not bool(getattr(self, "phase3_heading_entry_ready", False)):
+                if phase in PHASES_STOP_MOTORS:
                     self.stop_motors()
                     time.sleep(MOTOR_IDLE_SLEEP)
                     continue
-                target_heading = direction
-                nav_heading, heading_source = self._phase3_heading(snapshot)
-                if nav_heading is not None:
-                    self.phase3_no_heading_start = None
-                    diff = self._angle_diff_deg(target_heading, nav_heading)
-                    using_gps_fallback = heading_source.startswith("GPS")
-                    heading_deadband = (
-                        PHASE3_GPS_FALLBACK_DEADBAND_DEG if using_gps_fallback else PHASE3_HEADING_DEADBAND_DEG
+
+                obstacle_detected = (
+                    phase not in PHASES_SKIP_OBSTACLE
+                    and bool(snapshot.get("obstacle_valid", False))
+                    and obstacle_dist is not None
+                    and 0 < obstacle_dist < OBSTACLE_AVOID_DIST
+                )
+                if obstacle_detected:
+                    self.obstacle_detect_count += 1
+                else:
+                    self.obstacle_detect_count = 0
+
+                if self.obstacle_detect_count >= OBSTACLE_CONFIRM_COUNT:
+                    print(f"Obstacle Detected! {obstacle_dist:.1f}cm")
+                    self.stop_motors()
+                    time.sleep(OBSTACLE_PAUSE_TIME)
+                    turn_fast = self._clamp_percent(OBSTACLE_SPEED)
+                    turn_slow = self._clamp_percent(OBSTACLE_SPEED * 0.35)
+                    self._set_forward_diff_turn("right", turn_fast, turn_slow, cmd_type="obstacle_forward_turn")
+                    time.sleep(OBSTACLE_TURN_TIME)
+                    self.stop_motors()
+                    time.sleep(OBSTACLE_PAUSE_TIME)
+                    self.obstacle_detect_count = 0
+                    continue
+
+                if phase == Phase.PHASE1 and direction == PARACHUTE_DIRECTION:
+                    self.set_motors(
+                        PARACHUTE_SEPARATION_SPEED,
+                        True,
+                        PARACHUTE_SEPARATION_SPEED,
+                        True,
+                        ramp_time=PHASE1_SOFTSTART_RAMP_TIME,
+                        step_interval=PHASE1_SOFTSTART_STEP,
+                        cmd_type="phase1_parachute_separation",
                     )
-                    turn_scale = PHASE3_GPS_FALLBACK_TURN_SCALE if using_gps_fallback else 1.0
-                    straight_speed, turn_outer, turn_inner = self._phase3_legacy_drive_speeds(turn_scale=turn_scale)
-                    if abs(diff) <= heading_deadband:
+                    time.sleep(PARACHUTE_MOTOR_PULSE)
+                    continue
+
+                if phase == Phase.PHASE2:
+                    if self.phase2_stage == PHASE2_STAGE_ESCAPE:
                         self.set_motors(
-                            straight_speed,
+                            PHASE2_SPEED,
                             True,
-                            straight_speed,
+                            PHASE2_SPEED,
+                            True,
+                            ramp_time=PHASE2_RAMP_TIME,
+                            cmd_type="phase2_escape_forward",
+                        )
+                    elif self.phase2_stage == PHASE2_STAGE_OFFSET:
+                        offset_mode = getattr(self, "phase2_offset_mode", "")
+                        if offset_mode == PHASE2_OFFSET_MODE_REORIENT:
+                            self._drive_phase2_forward_reorient()
+                        elif offset_mode in (PHASE2_OFFSET_MODE_BNO_WAIT, PHASE2_OFFSET_MODE_READINESS):
+                            self.stop_motors()
+                        else:
+                            hold = self._phase2_offset_hold_speeds(snapshot)
+                            if hold is None:
+                                self.stop_motors()
+                            else:
+                                speed_l, speed_r, heading_error = hold
+                                cmd_type = (
+                                    "phase2_offset_heading_hold_straight"
+                                    if abs(heading_error) <= float(PHASE2_OFFSET_HOLD_DEADBAND_DEG)
+                                    else "phase2_offset_heading_hold"
+                                )
+                                self.set_motors(
+                                    speed_l,
+                                    True,
+                                    speed_r,
+                                    True,
+                                    ramp_time=PHASE2_RAMP_TIME,
+                                    cmd_type=cmd_type,
+                                )
+                    elif self.phase2_stage == PHASE2_STAGE_CALIBRATION:
+                        elapsed = 0.0
+                        if self.phase2_stage_start is not None:
+                            elapsed = time.time() - self.phase2_stage_start
+                        speed_l, motor1_forward, speed_r, motor2_forward = (
+                            self._phase2_calibration_pattern(elapsed)
+                        )
+                        self.set_motors(
+                            speed_l,
+                            motor1_forward,
+                            speed_r,
+                            motor2_forward,
+                            ramp_time=PHASE2_RAMP_TIME,
+                            cmd_type="phase2_calibration_forward_arc",
+                        )
+                    else:
+                        self.stop_motors()
+                    time.sleep(MOTOR_LOOP_INTERVAL)
+                    continue
+
+                if phase == Phase.PHASE3:
+                    if not bool(getattr(self, "phase3_heading_entry_ready", False)):
+                        self.stop_motors()
+                        time.sleep(MOTOR_IDLE_SLEEP)
+                        continue
+                    target_heading = direction
+                    nav_heading, heading_source = self._phase3_heading(snapshot)
+                    if nav_heading is not None:
+                        self.phase3_no_heading_start = None
+                        diff = self._angle_diff_deg(target_heading, nav_heading)
+                        using_gps_fallback = heading_source.startswith("GPS")
+                        heading_deadband = (
+                            PHASE3_GPS_FALLBACK_DEADBAND_DEG if using_gps_fallback else PHASE3_HEADING_DEADBAND_DEG
+                        )
+                        turn_scale = PHASE3_GPS_FALLBACK_TURN_SCALE if using_gps_fallback else 1.0
+                        straight_speed, turn_outer, turn_inner = self._phase3_legacy_drive_speeds(turn_scale=turn_scale)
+                        if abs(diff) <= heading_deadband:
+                            self.set_motors(
+                                straight_speed,
+                                True,
+                                straight_speed,
+                                True,
+                                ramp_time=PHASE3_FORWARD_RAMP_TIME,
+                                cmd_type="phase3_gps_forward",
+                            )
+                        elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
+                            turn_side = "left" if diff > 0 else "right"
+                            self._set_forward_pivot_turn(
+                                turn_side,
+                                pivot_speed=float(PHASE3_PIVOT_SPEED),
+                                cmd_type="phase3_gps_pivot",
+                                ramp_time=PHASE3_TURN_RAMP_TIME,
+                            )
+                        else:
+                            turn_fast = turn_outer
+                            turn_slow = turn_inner
+                            if diff > 0:
+                                self.set_motors(
+                                    turn_fast,
+                                    True,
+                                    turn_slow,
+                                    True,
+                                    ramp_time=PHASE3_TURN_RAMP_TIME,
+                                    cmd_type="phase3_gps_turn",
+                                )
+                            else:
+                                self.set_motors(
+                                    turn_slow,
+                                    True,
+                                    turn_fast,
+                                    True,
+                                    ramp_time=PHASE3_TURN_RAMP_TIME,
+                                    cmd_type="phase3_gps_turn",
+                                )
+                    else:
+                        now = time.time()
+                        if self.phase3_no_heading_start is None:
+                            self.phase3_no_heading_start = now
+                        elapsed = now - self.phase3_no_heading_start
+                        phase3_speed = self._clamp_percent(PHASE3_NO_HEADING_SPEED)
+                        turn_bias = float(PHASE3_NO_HEADING_TURN_BIAS)
+                        cycle = elapsed % (float(PHASE3_NO_HEADING_TURN_INTERVAL) * 2.0)
+                        if cycle < float(PHASE3_NO_HEADING_TURN_INTERVAL):
+                            left_speed = self._clamp_percent(phase3_speed)
+                            right_speed = self._clamp_percent(phase3_speed - turn_bias)
+                        else:
+                            left_speed = self._clamp_percent(phase3_speed - turn_bias)
+                            right_speed = self._clamp_percent(phase3_speed)
+                        self.set_motors(
+                            left_speed,
+                            True,
+                            right_speed,
                             True,
                             ramp_time=PHASE3_FORWARD_RAMP_TIME,
-                            cmd_type="phase3_gps_forward",
-                        )
-                    elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
-                        turn_side = "left" if diff > 0 else "right"
-                        self._set_forward_pivot_turn(
-                            turn_side,
-                            PHASE3_PIVOT_SPEED,
-                            cmd_type="phase3_gps_pivot",
-                            speed_inner=0.0,
-                            ramp_time=PHASE3_TURN_RAMP_TIME,
-                        )
-                    else:
-                        fast_side = "left" if diff > 0 else "right"
-                        outer_speed = PHASE3_LARGE_ERROR_OUTER_SPEED if abs(diff) >= PHASE3_LARGE_ERROR_DEG else turn_outer
-                        inner_speed = PHASE3_LARGE_ERROR_INNER_SPEED if abs(diff) >= PHASE3_LARGE_ERROR_DEG else turn_inner
-                        self._set_forward_diff_turn(
-                            fast_side,
-                            outer_speed,
-                            inner_speed,
-                            cmd_type="phase3_gps_turn",
-                            ramp_time=PHASE3_TURN_RAMP_TIME,
-                        )
-                else:
-                    if self.phase3_no_heading_start is None:
-                        self.phase3_no_heading_start = time.time()
-                    elapsed_no_heading = time.time() - self.phase3_no_heading_start
-                    # Drive forward slowly during heading loss so GPS receives movement vectors to recover course
-                    slow_probe_speed = self._clamp_percent(PHASE3_FORWARD_SPEED * 0.5)
-                    self.set_motors(
-                        slow_probe_speed,
-                        True,
-                        slow_probe_speed,
-                        True,
-                        ramp_time=PHASE3_FORWARD_RAMP_TIME,
-                        cmd_type="phase3_no_heading_probe",
-                    )
-                    if elapsed_no_heading >= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
-                        if self.led_blink_timer % 10 == 0:
-                            print("Phase3 warning: heading lost; continuing probe drive to recover course...")
-            elif phase == Phase.PHASE4:
-                # Phase4 is camera-only: keep all turning forward-only to avoid reverse torque.
-                cone_prob = snapshot.get("cone_probability", 0.0)
-                cone_reached = snapshot.get("cone_is_reached", False)
-                cone_seen = cone_reached or (cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE4)
-                if cone_seen:
-                    filtered_dir = self._update_phase45_filtered_cone_dir(cone_direction, True)
-                    if filtered_dir is None:
-                        filtered_dir = CONE_CENTER_POSITION
-                    err = filtered_dir - CONE_CENTER_POSITION
-                    abs_err = abs(err)
-                    if abs_err <= PHASE4_ALIGN_STOP_DEADBAND:
-                        self.set_motors(
-                            PHASE4_ALIGN_FORWARD_SPEED,
-                            True,
-                            PHASE4_ALIGN_FORWARD_SPEED,
-                            True,
-                            ramp_time=PHASE4_MOTOR_RAMP_TIME,
-                            cmd_type="phase4_camera_center_forward",
-                        )
-                        time.sleep(PHASE45_MOTOR_LOOP_INTERVAL)
-                        continue
-                    turn_side = "right" if err > 0 else "left"
-                    self._set_forward_pivot_turn(
-                        turn_side,
-                        PHASE4_ALIGN_PIVOT_SPEED,
-                        cmd_type="phase4_camera_pivot_align",
-                        speed_inner=PHASE4_ALIGN_INNER_SPEED,
-                        ramp_time=PHASE4_MOTOR_RAMP_TIME,
-                    )
-                else:
-                    self._update_phase45_filtered_cone_dir(cone_direction, False)
-                    # Keep rotating in one direction so the rover can sweep through 180 deg
-                    # instead of dithering around the initial heading.
-                    self._set_forward_pivot_turn(
-                        "left",
-                        SEARCH_ROTATION_SPEED,
-                        cmd_type="phase4_search_pivot",
-                        speed_inner=SEARCH_ROTATION_INNER_SPEED,
-                        ramp_time=PHASE4_MOTOR_RAMP_TIME,
-                    )
-            elif phase == Phase.PHASE5:
-                cone_prob = snapshot.get("cone_probability", 0.0)
-                cone_reached = snapshot.get("cone_is_reached", False)
-                cone_seen = cone_reached or (cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE5)
-                filtered_dir = self._update_phase45_filtered_cone_dir(cone_direction, cone_seen)
-                steer_dir = filtered_dir if filtered_dir is not None else CONE_CENTER_POSITION
-                err = steer_dir - CONE_CENTER_POSITION
-                if abs(err) <= PHASE5_STEER_DEADBAND:
-                    self.set_motors(
-                        PHASE5_BASE_SPEED,
-                        True,
-                        PHASE5_BASE_SPEED,
-                        True,
-                        ramp_time=PHASE5_MOTOR_RAMP_TIME,
-                        cmd_type="phase5_approach_forward",
-                    )
-                else:
-                    turn_total = self._clamp_percent(
-                        min(PHASE5_TURN_CLAMP, abs(err) * APPROACH_TURN_GAIN)
-                    )
-                    inner_speed = self._clamp_percent(
-                        max(PHASE5_BASE_SPEED - turn_total, PHASE5_BASE_SPEED * 0.55)
-                    )
-                    outer_speed = self._clamp_percent(PHASE5_BASE_SPEED + turn_total)
-                    if err > 0:
-                        self.set_motors(
-                            outer_speed,
-                            True,
-                            inner_speed,
-                            True,
-                            ramp_time=PHASE5_MOTOR_RAMP_TIME,
-                            cmd_type="phase5_approach_steer_right",
-                        )
-                    else:
-                        self.set_motors(
-                            inner_speed,
-                            True,
-                            outer_speed,
-                            True,
-                            ramp_time=PHASE5_MOTOR_RAMP_TIME,
-                            cmd_type="phase5_approach_steer_left",
+                            cmd_type="phase3_no_heading_search",
                         )
 
-            if phase in (Phase.PHASE4, Phase.PHASE5):
-                time.sleep(PHASE45_MOTOR_LOOP_INTERVAL)
-            elif phase == Phase.PHASE3:
-                time.sleep(PHASE3_MOTOR_LOOP_INTERVAL)
-            else:
+                if phase in (Phase.PHASE4, Phase.PHASE5):
+                    if not self._phase45_camera_track_step(snapshot):
+                        self.stop_motors()
+
+                if phase in (Phase.PHASE4, Phase.PHASE5):
+                    time.sleep(PHASE45_MOTOR_LOOP_INTERVAL)
+                elif phase == Phase.PHASE3:
+                    time.sleep(PHASE3_MOTOR_LOOP_INTERVAL)
+                else:
+                    time.sleep(MOTOR_LOOP_INTERVAL)
+            except Exception as e:
+                print(f"Exception in move_motor_thread: {e}")
                 time.sleep(MOTOR_LOOP_INTERVAL)
         self.stop_motors()
 
