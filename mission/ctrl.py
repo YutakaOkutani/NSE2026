@@ -498,25 +498,58 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if baseline < float(GPS_HEADING_BASELINE_MIN_DIST):
             return False
         last_cmd = str(getattr(self, "last_motor_command", {}).get("type", ""))
-        if last_cmd == "phase3_gps_pivot":
-            return False
+        if last_cmd not in ("phase3_gps_forward", "phase2_escape_forward", "phase2_offset_heading_hold_straight", "phase2_offset_forward"):
+            try:
+                heading_diff = abs(float(snapshot.get("heading_diff", 180.0)))
+            except (TypeError, ValueError):
+                heading_diff = 180.0
+            if heading_diff > 15.0:
+                return False
         return True
 
-    def _coerce_speed(self, value):
+    def _update_bno_heading_offset_from_gps(self, snapshot):
+        if not self._heading_offset_learning_ready(snapshot):
+            return
+        if not snapshot.get("angle_valid", False):
+            return
+        gps_heading = self._normalize_heading_deg(snapshot.get("gps_heading"))
+        bno_heading = self._normalize_heading_deg(snapshot.get("angle"))
+        if gps_heading is None or bno_heading is None:
+            return
+
         try:
-            speed = float(value)
+            gps_fix_seq = int(snapshot.get("gps_fix_seq", 0))
         except (TypeError, ValueError):
-            return 0.0
-        if not math.isfinite(speed):
-            return 0.0
-        return max(0.0, speed)
+            return
+        if gps_fix_seq <= self._heading_offset_last_gps_fix_seq:
+            return
+        self._heading_offset_last_gps_fix_seq = gps_fix_seq
+
+        observed_offset = self._angle_diff_deg(gps_heading, bno_heading)
+        self._update_heading_offset_estimate("bno", observed_offset)
+
+    def _update_mag_heading_offset_from_gps(self, snapshot, gps_heading, mag_heading):
+        if not self._heading_offset_learning_ready(snapshot):
+            return
+        gps_heading = self._normalize_heading_deg(gps_heading)
+        mag_heading = self._normalize_heading_deg(mag_heading)
+        if gps_heading is None or mag_heading is None:
+            return
+
+        try:
+            gps_fix_seq = int(snapshot.get("gps_fix_seq", 0))
+        except (TypeError, ValueError):
+            return
+        if gps_fix_seq <= getattr(self, "_mag_heading_offset_last_gps_fix_seq", 0):
+            return
+        self._mag_heading_offset_last_gps_fix_seq = gps_fix_seq
+
+        observed_offset = self._angle_diff_deg(gps_heading, mag_heading)
+        self._update_heading_offset_estimate("mag", observed_offset)
 
     def _update_heading_offset_estimate(self, prefix, observed_offset):
         observed_offset_norm = self._normalize_heading_deg(observed_offset)
         if observed_offset_norm is None:
-            return
-        observed_offset_abs = abs(self._angle_diff_deg(observed_offset_norm, 0.0))
-        if observed_offset_abs > float(HEADING_OFFSET_LEARN_MAX_ABS_OFFSET_DEG):
             return
         observed_offset = observed_offset_norm
 
@@ -527,24 +560,24 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         residual_limit = max(1.0, float(HEADING_OFFSET_LEARN_MAX_RESIDUAL_DEG))
 
         if getattr(self, valid_attr, False):
-            current_offset = self._normalize_heading_deg(getattr(self, offset_attr, 0.0))
-            if current_offset is None:
-                return
             is_verified = bool(getattr(self, f"{prefix}_heading_offset_verified", False))
-            residual = abs(self._angle_diff_deg(observed_offset, current_offset))
-            if is_verified and residual > residual_limit:
+            if is_verified:
+                current_offset = self._normalize_heading_deg(getattr(self, offset_attr, 0.0))
+                if current_offset is None:
+                    return
+                residual = abs(self._angle_diff_deg(observed_offset, current_offset))
+                if residual > residual_limit:
+                    return
+                offset_delta = self._angle_diff_deg(observed_offset, current_offset)
+                max_step = max(1.0, float(PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG))
+                offset_delta = max(-max_step, min(max_step, offset_delta))
+                alpha = max(0.0, min(1.0, float(PHASE3_BNO_GPS_OFFSET_ALPHA)))
+                setattr(
+                    self,
+                    offset_attr,
+                    self._normalize_heading_deg(current_offset + offset_delta * alpha),
+                )
                 return
-            offset_delta = self._angle_diff_deg(observed_offset, current_offset)
-            max_step = max(1.0, float(PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG))
-            offset_delta = max(-max_step, min(max_step, offset_delta))
-            alpha = 0.5 if not is_verified else max(0.0, min(1.0, float(PHASE3_BNO_GPS_OFFSET_ALPHA)))
-            setattr(
-                self,
-                offset_attr,
-                self._normalize_heading_deg(current_offset + offset_delta * alpha),
-            )
-            setattr(self, f"{prefix}_heading_offset_verified", True)
-            return
 
         candidate = self._normalize_heading_deg(getattr(self, candidate_attr, None))
         candidate_count = int(getattr(self, count_attr, 0))
@@ -567,9 +600,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         setattr(self, candidate_attr, candidate)
         setattr(self, count_attr, candidate_count)
 
-        if candidate_count >= int(HEADING_OFFSET_LEARN_BOOTSTRAP_SAMPLES):
+        if candidate_count >= 3:
             setattr(self, offset_attr, candidate)
             setattr(self, valid_attr, True)
+            setattr(self, f"{prefix}_heading_offset_verified", True)
 
     def _weighted_heading(self, snapshot):
         weights = []
