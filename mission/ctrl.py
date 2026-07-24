@@ -530,18 +530,20 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             current_offset = self._normalize_heading_deg(getattr(self, offset_attr, 0.0))
             if current_offset is None:
                 return
+            is_verified = bool(getattr(self, f"{prefix}_heading_offset_verified", False))
             residual = abs(self._angle_diff_deg(observed_offset, current_offset))
-            if residual > residual_limit:
+            if is_verified and residual > residual_limit:
                 return
             offset_delta = self._angle_diff_deg(observed_offset, current_offset)
             max_step = max(1.0, float(PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG))
             offset_delta = max(-max_step, min(max_step, offset_delta))
-            alpha = max(0.0, min(1.0, float(PHASE3_BNO_GPS_OFFSET_ALPHA)))
+            alpha = 0.5 if not is_verified else max(0.0, min(1.0, float(PHASE3_BNO_GPS_OFFSET_ALPHA)))
             setattr(
                 self,
                 offset_attr,
                 self._normalize_heading_deg(current_offset + offset_delta * alpha),
             )
+            setattr(self, f"{prefix}_heading_offset_verified", True)
             return
 
         candidate = self._normalize_heading_deg(getattr(self, candidate_attr, None))

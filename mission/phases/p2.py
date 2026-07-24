@@ -222,6 +222,7 @@ class Phase2Handler(BasePhaseHandler):
             fallback_offset = float(getattr(controller, "bno_heading_offset_candidate_deg", 0.0) or 0.0)
             controller.bno_heading_offset_deg = fallback_offset
             controller.bno_heading_offset_valid = True
+            controller.bno_heading_offset_verified = False
             controller.phase2_heading_quality_valid = True
             controller.phase3_heading_entry_ready = True
             controller.phase2_offset_reject_reason = f"retry_exhausted_fallback:{reason}"
@@ -403,6 +404,7 @@ class Phase2Handler(BasePhaseHandler):
         if estimate["valid"]:
             controller.bno_heading_offset_deg = estimate["offset_deg"]
             controller.bno_heading_offset_valid = True
+            controller.bno_heading_offset_verified = True
             controller.phase2_heading_quality_valid = True
             return
 

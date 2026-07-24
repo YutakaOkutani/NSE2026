@@ -288,6 +288,8 @@ class MotorManager:
             return False
         if not getattr(self, "bno_heading_offset_valid", False):
             return False
+        if not getattr(self, "bno_heading_offset_verified", True):
+            return False
         offset = self._normalize_heading_deg(getattr(self, "bno_heading_offset_deg", 0.0))
         if offset is None:
             return False
