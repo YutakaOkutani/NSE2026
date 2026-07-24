@@ -511,6 +511,15 @@ class MotorManager:
                             ramp_time=PHASE3_FORWARD_RAMP_TIME,
                             cmd_type="phase3_gps_forward",
                         )
+                    elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
+                        turn_side = "left" if diff > 0 else "right"
+                        self._set_forward_pivot_turn(
+                            turn_side,
+                            PHASE3_PIVOT_SPEED,
+                            cmd_type="phase3_gps_pivot",
+                            speed_inner=0.0,
+                            ramp_time=PHASE3_TURN_RAMP_TIME,
+                        )
                     else:
                         fast_side = "left" if diff > 0 else "right"
                         outer_speed = PHASE3_LARGE_ERROR_OUTER_SPEED if abs(diff) >= PHASE3_LARGE_ERROR_DEG else turn_outer

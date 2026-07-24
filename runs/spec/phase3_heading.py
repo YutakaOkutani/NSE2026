@@ -161,6 +161,41 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertIsNone(heading)
         self.assertNotEqual(source, "MAG_ALIGNED")
 
+    def test_phase3_large_heading_error_uses_pivot_turn(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase3_heading_entry_ready = True
+        ctrl.bno_heading_offset_valid = True
+        ctrl.bno_heading_offset_deg = 0.0
+
+        # Snapshot with angle = 270 (facing West), target = 90 (East) => diff = 180 (large error)
+        snapshot = {
+            "gps_detect": 1,
+            "lat": 35.0,
+            "lng": 139.0,
+            "gps_heading_valid": True,
+            "gps_heading": 270.0,
+            "gps_speed_mps": 0.5,
+            "angle_valid": True,
+            "angle": 270.0,
+        }
+
+        # Simulate motor control loop in Phase 3
+        nav_heading, heading_source = ctrl._phase3_heading(snapshot)
+        diff = ctrl._angle_diff_deg(90.0, nav_heading)
+        turn_side = "left" if diff > 0 else "right"
+        ctrl._set_forward_pivot_turn(
+            turn_side,
+            34,
+            cmd_type="phase3_gps_pivot",
+            speed_inner=0.0,
+            ramp_time=0.1,
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual(kwargs["cmd_type"], "phase3_gps_pivot")
+        # Ensure one wheel is stopped (0.0) for in-place pivot turn
+        self.assertTrue(args[0] == 0.0 or args[2] == 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

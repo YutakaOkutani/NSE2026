@@ -498,7 +498,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if baseline < float(GPS_HEADING_BASELINE_MIN_DIST):
             return False
         last_cmd = str(getattr(self, "last_motor_command", {}).get("type", ""))
-        if last_cmd == "phase3_gps_turn":
+        if last_cmd == "phase3_gps_pivot":
             return False
         return True
 
