@@ -1,0 +1,96 @@
+# 07 Mission Specification
+
+> **Audience: AI coding and debugging agents working on mission behavior.** This page owns Phase intent and transition semantics. Read source for current thresholds.
+
+## Mission contract
+
+- Start at Phase 0 through `run_full_mission()` and terminate through Phase 7 or safe shutdown.
+- Use the normal forward sequence `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7`.
+- Allow bounded recovery transitions `4 -> 3`, `5 -> 3`, and `5 -> 4`.
+- Preserve the GPS-arrival latch across Phase 4/5 recovery so noisy distance does not undo a confirmed arrival.
+- Enforce both local handler timers and cumulative controller budgets; Phase re-entry must not reset cumulative mission exposure.
+- Keep verified goal, forced goal, total timeout, subset completion, interruption, and abnormal exit distinguishable.
+- Stop motors in Phase 0 and Phase 7 and on every shutdown path.
+
+Current numeric thresholds, pins, speeds, and budgets are authoritative in `mission/const.py`.
+
+## Configuration contract
+
+- Load only repository-root `mission.toml` in production.
+- Require `[target]` and `[radio]`; reject missing, malformed, unknown, wrong-type, non-finite, or out-of-range values before hardware initialization.
+- Keep target coordinates and radio mode out of tracked constants.
+- Ignore legacy target environment variables and reject legacy production CLI arguments.
+- Keep the example target deliberately invalid until an operator edits the local copy.
+
+## Phase responsibilities
+
+| Phase | Required behavior | Success transition | Recovery or forced transition | Critical evidence |
+| --- | --- | --- | --- | --- |
+| P0 release/descent | Keep motors stopped; accept only fresh BMP/BNO acceleration; latch altitude-drop or confirmed impact; hold before release | P1 after held release evidence | P1 on bounded timeout; restore radio either way | sensor stale ages, baseline/delta, exit reason/detail |
+| P1 separation | Run the Manager-owned separation pattern for a bounded interval; collect only diagnostic heading-offset evidence | P2 after interval | Controller budget also forces P2 | elapsed time, motor command, candidate quality |
+| P2 escape/calibration/alignment | Escape parachute, calibrate, learn GPS/BNO offset from a straight stable segment, confirm heading readiness | P3 when heading is ready; P4 if GPS arrival was already confirmed | Bounded reorientation/retry; best-effort/fallback offset; controller timeout | stage/mode, calibration, progress, reject reason, offset validity |
+| P3 GPS navigation | Compute distance/azimuth from valid GPS; prefer GPS-aligned BNO for high-rate steering; confirm arrival over samples/time | P4 on confirmed arrival | P4 on local/cumulative timeout; continue conservatively when heading is unavailable | GPS quality/sequence, heading source/trust, arrival latch |
+| P4 visual search/alignment | Search and align; require probability, centering, direction consistency, or effective reached evidence | P5 on confirmed detection; P5 with explicit timeout entry reason | P3 when GPS says far before arrival latch or camera recovery is exhausted | probability, method/direction, confirmation count, camera health |
+| P5 visual approach | Approach using visual steering; confirm reached over multiple frames | P6 with `GOAL_REACHED` | P4 after bounded loss; P3 when far/camera dead; P6 with forced-goal timeout reason | entry reason, loss/reach counts, timeout, command |
+| P6 final ram | Apply short bounded forward command only when not globally timed out | P7 after duration | Immediate P7 on total-timeout state | mission end reason, duration, command |
+| P7 terminal | Stop motors, resolve arrival semantics, signal goal/give-up, request shutdown | Process exit | None | arrival reason, mission end reason, final row |
+
+## Phase 2 invariants
+
+- Do not skip the escape stage even if GPS already reports arrival; transition to P4 only after escape completes.
+- Treat the P1 offset candidate as diagnostic only because parachute drag can bias it.
+- Learn alignment only from accepted GPS fixes, valid BNO heading, sufficient straight-line progress, stable heading, and consistent subsegments.
+- After BNO recovery, discard the active alignment segment and collect a fresh reference.
+- Exclude settling/reorientation time from the next straight-leg collection budget.
+- Bound stalled progress, BNO wait, and retry count.
+- Mark a fallback offset as unverified; do not present it as calibrated evidence.
+
+## Phase 3 invariants
+
+- Do not use raw magnetometer-only steering when GPS and aligned BNO are untrusted.
+- Prefer aligned BNO after GPS-derived offset is valid; use GPS heading as fallback before alignment.
+- Treat GPS course as sparse evidence for alignment, not automatically as the high-rate motor heading.
+- Require arrival confirmation; one close fix must not transition.
+- Keep arrival latch set after confirmation.
+- When no trusted heading exists, keep behavior bounded and observable rather than inventing a heading.
+
+## Phase 4/5 invariants
+
+- Keep detector acquisition/normalization in the sensor/vision layer and mission interpretation in the Phase.
+- Require short-term consistency for P4 detection; a weak single frame must not transition.
+- In P5, reset reach confirmation on non-reached evidence.
+- Distinguish cone loss (`P5 -> P4`) from navigation/camera failure (`P4/P5 -> P3`).
+- Use the P4 timeout entry reason to select the shorter P5 exposure.
+- Do not let a camera failure create an unbounded search/approach loop.
+- Keep the legacy camera relay outside the production architecture.
+
+## Timeout and terminal semantics
+
+- Derive the global timeout from cumulative Phase budgets, final-ram allowance, and transition margin.
+- Preserve the minimum P3 navigation reserve when changing earlier budgets.
+- Accumulate P3/P4/P5 time across re-entry.
+- On global timeout, force safe terminal handling; do not perform the final ram.
+- `GOAL_REACHED` is verified visual completion.
+- `PHASE5_TIMEOUT_FORCED_GOAL` is forced progress and must remain distinguishable from success.
+- `MISSION_TOTAL_TIMEOUT` is give-up behavior.
+- Any new terminal reason must update log tests, Phase 7 resolution, and analysis interpretation.
+
+## Change matrix
+
+| Change | Inspect together |
+| --- | --- |
+| Any Phase transition | handler, controller cumulative transition, `runs/spec/`, log reason |
+| P0 detection | BNO/BMP freshness, radio restore, `p0_detect.py` |
+| P2 alignment | motor patterns, GPS fix sequence, BNO recovery, `phase2_flow.py`, `phase3_heading.py` |
+| P3 navigation | sensor GPS acceptance, heading selection, motor policy, navigation specs |
+| P4/P5 vision | camera thread, `lib/cone_detect.py`, motor policy, saved field frames |
+| P6/P7 | total-timeout branch, stop behavior, final reasons/log row |
+| Mission budgets | every local timeout, re-entry path, minimum P3 reserve, full mission envelope |
+
+## AI Checklist
+
+- Does the Phase still have one explicit objective and bounded exit?
+- Are success, fallback, forced progress, and give-up distinct?
+- Are noisy observations confirmed and freshness-aware?
+- Does Phase re-entry preserve cumulative budgets and required latches?
+- Did I check adjacent Phases, Manager behavior, logs, and mapped specs?

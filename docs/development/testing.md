@@ -1,183 +1,19 @@
-# 試験コードの設計・デバッグ指針
+# Deprecated Testing Link
+
+> **Audience: AI agents following a legacy link.** Do not load this page in addition to its owners.
 
 ## 実行コマンド一覧
 
-必要なら先に仮想環境を有効化する。コマンドはリポジトリ直下で実行する。
+- Human setup and execution: [`../../README.md`](../../README.md)
+- AI diagnosis, test tiers, and the single full spec command: [`../06-debug-and-test-rules.md`](../06-debug-and-test-rules.md)
 
-```bash
-source venv/bin/activate
-cd ~/NSE2026
-```
+## 超音波センサ（HC-SR04）の安全な接続
 
-| 目的 | コマンド |
-| --- | --- |
-| 本番相当の全体実行 | `python3 main.py` |
-| パラ投下・着地衝撃試験 | `python3 runs/orch/p0_p1.py` |
-| センサ診断 | `python3 runs/diag/sensor.py` |
-| 超音波センサ診断 | `python3 runs/diag/sonar.py` |
-| GPS診断 | `python3 runs/diag/gps.py` |
-| モータ診断 | `python3 runs/diag/motor.py` |
-| LED診断 | `python3 runs/diag/led.py` |
-| 本番detector用ROI参照画像の撮影 | `python3 lib/roi_capture.py --count 3 --interval 0.5` |
-| 現場サンプルの収集 | `python3 runs/cam/capture.py --count 10 --interval 0.5 --prefix sample` |
-| 本番detectorのライブデバッグ | `python3 runs/cam/detect_dbg.py --phase 4` |
-| ログ解析（PC上） | `python3 analysis/log.py` |
+Before powering or testing the sensor, load [`../reference/hardware-safety.md`](../reference/hardware-safety.md). It owns the mandatory ECHO voltage-divider constraint.
 
-現場サンプルは学習・比較・記録用であり、本番ROIには自動反映されない。
+This compatibility page preserves existing anchors in the human-facing root `README.md`.
 
-## `runs/`: 試験インターフェース
+## AI Checklist
 
-`runs/` は試験のためのディレクトリである。本番品質を落とさず、切り分けの速度を上げるための「検証インターフェース」として維持する。
-
-### この層の役割
-
-- 本番経路の対象範囲を限定して試す
-- 不具合の切り分けを速くする
-- 実験前の確認を標準化する
-- 現場で必要な試験入口を再利用可能にする
-- `runs/` のテスト結果が、そのまま本番コードの改善につながる状態を保つ
-
-### 原則
-
-- `runs/` は本番ロジックを置く場所ではない
-- `runs/` は本番コードとできるだけ同じ関数・同じ制御経路を呼ぶ
-- `runs/` で見つかった課題は、試験コード固有の問題として閉じず、本番層の改善へ返す
-- 本番との差分は最小限であるべき
-- 試験目的はファイルごとに明確であるべき
-- ログ保存先や引数は再現可能性を高める方向で設計する
-
-### 良い `runs` の条件
-
-- 何を確認するスクリプトかすぐ分かる
-- 失敗しても本番層の責務を汚さない
-- 実験記録と結びつけやすい
-- 新しいメンバーでも使い方を誤りにくい
-
-### サブフォルダの役割
-
-- `diag/`
-  - 単体デバイス確認コードを置く場所
-- `spec/`
-  - フェーズ0の仕様確認コードを置く場所
-- `orch/`
-  - 本番相当の部分統合試験を置く場所
-- `cam/`
-  - 視覚系と中継系の試験コードを置く場所
-
-### 改善指針
-
-- 新しい試験入口を作るときは、対象、差分、ログ先、終了条件を明記する
-- 同じ目的のスクリプトが増え始めたら統合を検討する
-- 本番相当試験は、可能な限り `run_phase_sequence()` や既存 controller 経路を再利用する
-
-## `runs/diag/`: ハード単体診断
-
-ハードの状態を短時間で把握し、上位ロジックへ持ち込む前に切り分ける。
-
-- 1スクリプト1系統を基本とする
-- 起動が速く、対象デバイスと正常時の期待値が明確であること
-- 異常時は「無反応」「値異常」「初期化失敗」を区別する
-- モータ系は安全停止を最優先する
-- 実機試験前の点検を標準化し、上位フェーズ不具合とハード不具合を切り分ける
-
-### 超音波センサ（HC-SR04）の安全な接続
-
-標準HC-SR04は5 Vで動作し、ECHOも5 Vのパルスを出力する。一方、Raspberry PiのGPIO入力は3.3 Vまでであるため、ECHOをGPIO24へ直結してはならない。2026-04-13版の現行基板には、このレベル変換回路が実装されていない。
-
-既製基板を使用する場合は、センサと基板の間に次の外付け分圧回路を入れる。TRIGはGPIO23から直接接続できる。
-
-```text
-HC-SR04                         Raspberry Pi / 基板
-
-VCC  -------------------------------- 5 V
-GND  -------------------------------- GND
-TRIG -------------------------------- GPIO23
-ECHO ---- 10 kΩ ----+---------------- GPIO24
-                    |
-                   10 kΩ
-                    |
-                   GND
-```
-
-この分圧では、ECHOの5 VがGPIO側で約2.5 Vになる。次版の基板では、ECHO信号上に分圧抵抗2本または適切なレベル変換回路を追加する。HC-SR04互換品には電圧仕様の異なる製品もあるが、型番だけで3.3 V対応と判断せず、採用品の仕様を確認する。
-
-配線を直してから次を実行し、対象物を前後に動かして`VALID`の距離が追従することを確認する。
-
-```bash
-python3 runs/diag/sonar.py --duration 10
-```
-
-- `VALID`: 正常な距離を取得した
-- `HOLD`: 一時的に読み取れず、直前の正常値を保持している
-- `STALE`: 最終正常値から1秒以上更新されていない
-
-すでにECHOを直結して使用していた場合も、読み取りできていることを安全性の根拠にしない。分圧回路を追加するまでは再通電しない。
-
-根拠資料:
-
-- [HC-SR04データシート](https://cdn.sparkfun.com/datasheets/Sensors/Proximity/HCSR04.pdf)
-- [Raspberry Pi GPIO仕様](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#voltage-specifications)
-- [Adafruit: HC-SR04を3.3 V GPIOへ接続する方法](https://cdn-learn.adafruit.com/downloads/pdf/distance-measurement-ultrasound-hcsr04.pdf)
-
-## `runs/spec/`: 仕様試験
-
-実機がなくても確認できる境界条件を固定し、ロジックの退行を防ぐ。
-
-全仕様試験は標準のunittest discoveryで実行する。
-
-```bash
-python3 -m unittest discover -s runs/spec -v
-```
-
-### 優先対象
-
-- フェーズ遷移条件
-- タイムアウト境界
-- センサー無効時の挙動
-- 誤検知抑制条件
-- fallback 条件
-
-### 指針
-
-- 小さなフェイクで本質を再現する
-- 条件の意味が読み取れるテスト名にする
-- バグ修正時は可能なら先に失敗ケースを追加する
-- 実機不具合でも、判断部だけは spec 化できないか検討する
-
-## `runs/orch/`: 部分統合試験
-
-本番との乖離を最小にしたまま、対象フェーズ範囲だけを繰り返し試す。
-
-- 差分は開始フェーズ、許可フェーズ、ログ先など必要最小限に留める
-- 本番の `run_phase_sequence()` を再利用する
-- `main.py` の代替ではなく、部分統合の入口として保つ
-- 何をショートカットし、何が本番と同じかを明確にする
-- 新しい入口を作る前に既存範囲で代替できないか確認する
-- 目標座標は本番と同じ`mission.toml`から読み、試験条件だけを引数で選ぶ
-
-## `runs/cam/`: 視覚・中継試験
-
-視覚系は再現性が低くなりやすいため、成功画像だけでなく、失敗画像、照明条件、通信遅延、保存物を含めて評価する。
-
-### 目的
-
-- 本番 detector の改善材料を集める
-- 検出、可視化、保存、中継を切り分けて検証する
-- false positive / false negative を減らす
-
-### スクリプトの位置づけ
-
-- `lib/roi_capture.py`: 本番 detector が読む ROI 参照画像の撮影
-- `runs/cam/capture.py`: 現場サンプルの収集
-- `runs/cam/detect_dbg.py`: 本番 detector の観測・比較
-- `relay_*`: 検出結果と遠隔観測の補助
-
-### 指針
-
-- 本番実装 `lib/cone_detect.py` を基準とする
-- 1回の試験で ROI と閾値を同時に変更しすぎない
-- GUI がなくても評価できる保存経路を持つ
-- 成功例だけでなく失敗例を資産化する
-- `probability` だけでなく、`method`、score 群、occupancy を評価する
-- 近距離、逆光、草地、空混入など失敗しやすい条件を意識して集める
-- 中継系では視覚判断と通信品質を分けて評価する
+- Am I using `06-debug-and-test-rules.md` for testing decisions?
+- Did I load `reference/hardware-safety.md` before physical sonar work?
