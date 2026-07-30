@@ -38,3 +38,6 @@ __pycache__/
 # formerly settings
 /machine.txt
 /mission.env
+
+# Swap files
+*.swp
