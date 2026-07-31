@@ -2,6 +2,8 @@ import math
 import sys
 import time
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -92,6 +94,19 @@ class Phase3ArrivalTest(unittest.TestCase):
         controller = _Phase3Controller(35.0, 139.0, 35.0, 139.0, gps_detect=0)
         Phase3Handler().execute(controller, controller.st.snapshot())
         self.assertEqual(controller.st.snapshot()["phase"], int(Phase.PHASE3))
+
+    def test_inactive_gps_log_matches_stopped_auto_resume_behavior(self):
+        controller = _Phase3Controller(35.0, 139.0, 35.0, 139.0, gps_detect=0)
+        controller.led_blink_timer = 20
+        output = StringIO()
+
+        with redirect_stdout(output):
+            Phase3Handler().execute(controller, controller.st.snapshot())
+
+        self.assertIn(
+            "GPS Lost: Motors stopped; waiting for fix (auto-resume).",
+            output.getvalue(),
+        )
 
 
 if __name__ == "__main__":

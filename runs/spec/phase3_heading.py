@@ -222,6 +222,27 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertEqual(first_args[0], first_args[2])
         self.assertEqual(second_kwargs["cmd_type"], "stop")
 
+    def test_phase3_gps_loss_stops_even_with_a_heading_source(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase3_heading_entry_ready = True
+        ctrl.bno_heading_offset_valid = True
+        ctrl.bno_heading_offset_verified = True
+        ctrl.bno_heading_offset_deg = 0.0
+        snapshot = {
+            "gps_detect": 0,
+            "gps_heading_valid": False,
+            "angle_valid": True,
+            "angle": 30.0,
+        }
+
+        heading, source, diff = ctrl._drive_phase3_navigation(snapshot, 90.0, now=10.0)
+
+        _, kwargs = ctrl.motor_commands[-1]
+        self.assertIsNone(heading)
+        self.assertEqual(source, "GPS_LOST_STOP")
+        self.assertIsNone(diff)
+        self.assertEqual(kwargs["cmd_type"], "stop")
+
     def test_phase3_active_gps_keeps_probing_until_course_is_available(self):
         ctrl = _HeadingOnlyController()
         snapshot = {

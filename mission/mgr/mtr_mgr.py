@@ -367,6 +367,15 @@ class MotorManager:
         """Apply one Phase3 motor decision and return heading diagnostics."""
         if now is None:
             now = time.time()
+        if snapshot.get("gps_detect", GPS_ACTIVE_DETECT) != GPS_ACTIVE_DETECT:
+            # A stale target heading is not enough to navigate safely after the
+            # position fix is lost.  The GPS thread keeps reconnecting while the
+            # rover waits here, and normal navigation resumes automatically on
+            # the first active fix.
+            self.phase3_no_heading_start = None
+            self.stop_motors()
+            return None, "GPS_LOST_STOP", None
+
         nav_heading, heading_source = self._phase3_heading(snapshot)
         if nav_heading is None:
             if self.phase3_no_heading_start is None:

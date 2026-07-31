@@ -125,7 +125,7 @@ class Phase3Handler(BasePhaseHandler):
                 controller.time_phase4_start = now
         else:
             if controller.led_blink_timer % GPS_LOST_LOG_INTERVAL == 0:
-                print("GPS Lost: Keep going...")
+                print("GPS Lost: Motors stopped; waiting for fix (auto-resume).")
 
 
 def run_standalone():
