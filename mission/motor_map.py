@@ -2,6 +2,8 @@ from mission.const import (
     MANUAL_TURN_SPEED_RATIO,
     MOTOR_DIR_INVERT_1,
     MOTOR_DIR_INVERT_2,
+    MOTOR_LEFT_MTR_INDEX,
+    MOTOR_RIGHT_MTR_INDEX,
 )
 
 
@@ -29,12 +31,32 @@ def forward_to_dir_value(forward, invert):
     return 1 if (bool(forward) ^ bool(invert)) else 0
 
 
+def map_logical_wheels_to_physical(
+    left_speed,
+    left_forward,
+    right_speed,
+    right_forward,
+):
+    """Map logical left/right wheel commands to physical MTR1/MTR2 order."""
+    if {int(MOTOR_LEFT_MTR_INDEX), int(MOTOR_RIGHT_MTR_INDEX)} != {1, 2}:
+        raise ValueError("Left/right motor mapping must contain MTR1 and MTR2 exactly once")
+    commands = {
+        int(MOTOR_LEFT_MTR_INDEX): (float(left_speed), bool(left_forward)),
+        int(MOTOR_RIGHT_MTR_INDEX): (float(right_speed), bool(right_forward)),
+    }
+    motor1_speed, motor1_forward = commands[1]
+    motor2_speed, motor2_forward = commands[2]
+    return motor1_speed, motor1_forward, motor2_speed, motor2_forward
+
+
 def get_manual_drive_pattern(cmd, speed):
     """Return a normalized two-motor command for manual WASD control.
 
-    Motor ordering is fixed as:
-    - A: MTR1 (left)
-    - B: MTR2 (right)
+    The returned A/B slots are logical wheel positions:
+    - A: left wheel
+    - B: right wheel
+
+    Physical MTR channel routing is applied immediately before GPIO output.
     """
     pattern = MANUAL_DRIVE_PATTERNS.get((cmd or "").lower())
     if pattern is None:

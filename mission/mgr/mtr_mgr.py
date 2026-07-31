@@ -95,7 +95,12 @@ from mission.const import (
     TURN_GAIN_SCALE_MIN,
     Phase,
 )
-from mission.motor_map import forward_to_dir_value, get_manual_drive_pattern, motor_forward_to_dir_value
+from mission.motor_map import (
+    forward_to_dir_value,
+    get_manual_drive_pattern,
+    map_logical_wheels_to_physical,
+    motor_forward_to_dir_value,
+)
 
 
 class MotorManager:
@@ -517,10 +522,12 @@ class MotorManager:
                                 cmd_type="phase3_gps_forward",
                             )
                         elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
-                            turn_side = "left" if diff > 0 else "right"
+                            # Compass heading increases clockwise: a positive
+                            # target error therefore requires a right turn.
+                            turn_side = "right" if diff > 0 else "left"
                             self._set_forward_pivot_turn(
                                 turn_side,
-                                pivot_speed=float(PHASE3_PIVOT_SPEED),
+                                speed_outer=float(PHASE3_PIVOT_SPEED),
                                 cmd_type="phase3_gps_pivot",
                                 ramp_time=PHASE3_TURN_RAMP_TIME,
                             )
@@ -580,6 +587,10 @@ class MotorManager:
                     time.sleep(MOTOR_LOOP_INTERVAL)
             except Exception as e:
                 print(f"Exception in move_motor_thread: {e}")
+                try:
+                    self.stop_motors()
+                except Exception as stop_exc:
+                    print(f"Emergency motor stop failed: {stop_exc}")
                 time.sleep(MOTOR_LOOP_INTERVAL)
         self.stop_motors()
 
@@ -688,10 +699,10 @@ class MotorManager:
 
     def set_motors(
         self,
-        speed_a,
-        forward_a,
-        speed_b,
-        forward_b,
+        speed_left,
+        forward_left,
+        speed_right,
+        forward_right,
         ramp_time=MOTOR_RAMP_TIME,
         step_interval=MOTOR_RAMP_STEP,
         cmd_type="set_motors",
@@ -699,9 +710,19 @@ class MotorManager:
         if self._shutdown_active():
             self.stop_motors()
             return
-        # Fixed motor mapping:
-        # - A => MTR1 => left
-        # - B => MTR2 => right
+        # Callers always use logical wheel order (left, right). The current
+        # airframe wiring is physical MTR1=right and MTR2=left.
+        (
+            speed_motor_1,
+            forward_motor_1,
+            speed_motor_2,
+            forward_motor_2,
+        ) = map_logical_wheels_to_physical(
+            speed_left,
+            forward_left,
+            speed_right,
+            forward_right,
+        )
         motor_1_pwm = self.devices.get(DEVICE_MOTOR_1_PWM)
         motor_1_dir = self.devices.get(DEVICE_MOTOR_1_DIR)
         motor_2_pwm = self.devices.get(DEVICE_MOTOR_2_PWM)
@@ -709,44 +730,60 @@ class MotorManager:
         if motor_1_pwm is None or motor_1_dir is None or motor_2_pwm is None or motor_2_dir is None:
             return
 
-        state_a = self.motor_state.setdefault(motor_1_pwm, {"speed": 0.0, "direction": True})
-        state_b = self.motor_state.setdefault(motor_2_pwm, {"speed": 0.0, "direction": True})
-        current_a = state_a["speed"]
-        current_b = state_b["speed"]
+        state_motor_1 = self.motor_state.setdefault(
+            motor_1_pwm, {"speed": 0.0, "direction": True}
+        )
+        state_motor_2 = self.motor_state.setdefault(
+            motor_2_pwm, {"speed": 0.0, "direction": True}
+        )
+        current_motor_1 = state_motor_1["speed"]
+        current_motor_2 = state_motor_2["speed"]
 
-        if (current_a > 0 and forward_a != state_a["direction"]) or (current_b > 0 and forward_b != state_b["direction"]):
-            current_a, current_b = self._ramp_pwm_dual(
+        if (
+            current_motor_1 > 0
+            and forward_motor_1 != state_motor_1["direction"]
+        ) or (
+            current_motor_2 > 0
+            and forward_motor_2 != state_motor_2["direction"]
+        ):
+            current_motor_1, current_motor_2 = self._ramp_pwm_dual(
                 motor_1_pwm,
-                current_a,
+                current_motor_1,
                 0.0,
                 motor_2_pwm,
-                current_b,
+                current_motor_2,
                 0.0,
                 ramp_time / RAMP_HALF_DIVISOR,
                 step_interval,
             )
 
-        motor_1_dir.value = motor_forward_to_dir_value(1, forward_a)
-        motor_2_dir.value = motor_forward_to_dir_value(2, forward_b)
+        motor_1_dir.value = motor_forward_to_dir_value(1, forward_motor_1)
+        motor_2_dir.value = motor_forward_to_dir_value(2, forward_motor_2)
 
-        target_a = self._apply_motor_speed_scale(speed_a, 1)
-        target_b = self._apply_motor_speed_scale(speed_b, 2)
-        current_a, current_b = self._ramp_pwm_dual(
+        target_motor_1 = self._apply_motor_speed_scale(speed_motor_1, 1)
+        target_motor_2 = self._apply_motor_speed_scale(speed_motor_2, 2)
+        current_motor_1, current_motor_2 = self._ramp_pwm_dual(
             motor_1_pwm,
-            current_a,
-            target_a,
+            current_motor_1,
+            target_motor_1,
             motor_2_pwm,
-            current_b,
-            target_b,
+            current_motor_2,
+            target_motor_2,
             ramp_time,
             step_interval,
         )
 
-        state_a["speed"] = current_a
-        state_a["direction"] = forward_a
-        state_b["speed"] = current_b
-        state_b["direction"] = forward_b
-        self._record_motor_command(cmd_type, current_a, forward_a, current_b, forward_b)
+        state_motor_1["speed"] = current_motor_1
+        state_motor_1["direction"] = forward_motor_1
+        state_motor_2["speed"] = current_motor_2
+        state_motor_2["direction"] = forward_motor_2
+        self._record_motor_command(
+            cmd_type,
+            current_motor_1,
+            forward_motor_1,
+            current_motor_2,
+            forward_motor_2,
+        )
 
     def stop_motors(self):
         motor_1_pwm = self.devices.get(DEVICE_MOTOR_1_PWM)

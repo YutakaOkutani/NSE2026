@@ -25,6 +25,36 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
         self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_1, 1.00)
         self.assertEqual(motor_diag.MOTOR_SPEED_SCALE_2, 1.00)
 
+    def test_logical_left_right_routes_to_measured_physical_channels(self):
+        mapped = motor_diag.map_logical_wheels_to_physical(
+            30.0,
+            True,
+            70.0,
+            False,
+        )
+
+        self.assertEqual(mapped, (70.0, False, 30.0, True))
+
+    def test_manual_left_turn_drives_physical_right_wheel_faster(self):
+        with patch.object(motor_diag, "set_motors") as set_motors:
+            self.assertTrue(motor_diag._apply_manual_drive_pattern("a", 100.0))
+
+        set_motors.assert_called_once_with(60.0, 1, 100.0, 1)
+        logical_call = set_motors.call_args.args
+        mapped = motor_diag.map_logical_wheels_to_physical(*logical_call)
+        self.assertEqual(mapped[0], 100.0)
+        self.assertEqual(mapped[2], 60.0)
+
+    def test_manual_right_turn_drives_physical_left_wheel_faster(self):
+        with patch.object(motor_diag, "set_motors") as set_motors:
+            self.assertTrue(motor_diag._apply_manual_drive_pattern("d", 100.0))
+
+        set_motors.assert_called_once_with(100.0, 1, 60.0, 1)
+        logical_call = set_motors.call_args.args
+        mapped = motor_diag.map_logical_wheels_to_physical(*logical_call)
+        self.assertEqual(mapped[0], 60.0)
+        self.assertEqual(mapped[2], 100.0)
+
     def test_quit_always_stops_motors(self):
         args = types.SimpleNamespace(default_speed=50.0)
         with patch.object(motor_diag, "parse_args", return_value=args):

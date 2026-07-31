@@ -241,6 +241,10 @@ MOTOR_RAMP_STEP = 0.05
 # 現行機体のモーター配線・個体差に合わせた固定値。
 MOTOR_DIR_INVERT_1 = True
 MOTOR_DIR_INVERT_2 = False
+# 実機配線では物理MTR1が右輪、物理MTR2が左輪。
+# 操舵ロジックは常に「左輪、右輪」の順で指令し、この対応で物理chへ変換する。
+MOTOR_LEFT_MTR_INDEX = 2
+MOTOR_RIGHT_MTR_INDEX = 1
 MANUAL_TURN_SPEED_RATIO = 3.0 / 5.0
 # モーター個体差補正 (PWM指令値に乗算)
 MOTOR_SPEED_SCALE_1 = 1.00
@@ -264,7 +268,7 @@ LED_TIMEOUT_ALERT_FAST_SLEEP = 0.08
 RADIO_COMMAND_TIMEOUT_SEC = 10.0
 
 # モーター・センサーのGPIO関連定数
-# Motor mapping (fixed): MTR1=LEFT, MTR2=RIGHT
+# Physical motor channels (fixed wiring): MTR1=RIGHT, MTR2=LEFT
 PIN_EN1 = 12
 PIN_PH1 = 13
 PIN_EN2 = 19

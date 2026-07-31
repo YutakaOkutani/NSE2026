@@ -20,7 +20,11 @@ from mission.const import (
     PIN_PH2,
     PWM_FREQ,
 )
-from mission.motor_map import get_manual_drive_pattern, motor_forward_to_dir_value
+from mission.motor_map import (
+    get_manual_drive_pattern,
+    map_logical_wheels_to_physical,
+    motor_forward_to_dir_value,
+)
 
 DEFAULT_SPEED = 100  # Default duty for manual control (0-100)
 SPEED_STEP = 5  # Duty adjustment step for interactive test (0-100)
@@ -116,7 +120,7 @@ def _apply_speed_scale(speed, motor_side):
 def set_motor(motor_side, speed, direction, ramp_time=0.6, step_interval=0.05):
     """
     Control motor duty and direction with a soft-start ramp.
-    :param motor_side: 'A' (Left / MTR1) or 'B' (Right / MTR2)
+    :param motor_side: physical 'A' (MTR1 / right) or 'B' (MTR2 / left)
     :param speed: PWM Duty Cycle (0 - 100)
     :param direction: 1 (Forward/High) or 0 (Reverse/Low)
     :param ramp_time: Time in seconds to ramp between duty changes.
@@ -154,48 +158,72 @@ def set_motor(motor_side, speed, direction, ramp_time=0.6, step_interval=0.05):
     state['direction'] = direction
 
 
-def set_motors(speed_a, dir_a, speed_b, dir_b, ramp_time=0.6, step_interval=0.05):
+def set_motors(
+    speed_left,
+    forward_left,
+    speed_right,
+    forward_right,
+    ramp_time=0.6,
+    step_interval=0.05,
+):
     """
-    Control both motors together with a synchronized ramp.
-    :param speed_a: PWM Duty Cycle (0 - 100) for Motor A
-    :param dir_a: 1 (Forward/High) or 0 (Reverse/Low) for Motor A
-    :param speed_b: PWM Duty Cycle (0 - 100) for Motor B
-    :param dir_b: 1 (Forward/High) or 0 (Reverse/Low) for Motor B
+    Control both logical wheels together with a synchronized ramp.
+    :param speed_left: PWM Duty Cycle (0 - 100) for the left wheel
+    :param forward_left: logical forward state for the left wheel
+    :param speed_right: PWM Duty Cycle (0 - 100) for the right wheel
+    :param forward_right: logical forward state for the right wheel
     :param ramp_time: Time in seconds to ramp between duty changes.
     :param step_interval: Interval between duty steps.
     """
     if motor_1_pwm is None or motor_1_dir is None or motor_2_pwm is None or motor_2_dir is None:
         return
 
-    state_a = motor_state['A']
-    state_b = motor_state['B']
-    current_a = state_a['speed']
-    current_b = state_b['speed']
+    (
+        speed_motor_1,
+        forward_motor_1,
+        speed_motor_2,
+        forward_motor_2,
+    ) = map_logical_wheels_to_physical(
+        speed_left,
+        forward_left,
+        speed_right,
+        forward_right,
+    )
+    state_motor_1 = motor_state['A']
+    state_motor_2 = motor_state['B']
+    current_motor_1 = state_motor_1['speed']
+    current_motor_2 = state_motor_2['speed']
 
     # If either direction changes, ramp both to zero first to reduce stress and keep sync.
-    if (current_a > 0 and dir_a != state_a['direction']) or (current_b > 0 and dir_b != state_b['direction']):
-        current_a, current_b = _ramp_pwm_dual(
-            motor_1_pwm, current_a, 0,
-            motor_2_pwm, current_b, 0,
+    if (
+        current_motor_1 > 0
+        and forward_motor_1 != state_motor_1['direction']
+    ) or (
+        current_motor_2 > 0
+        and forward_motor_2 != state_motor_2['direction']
+    ):
+        current_motor_1, current_motor_2 = _ramp_pwm_dual(
+            motor_1_pwm, current_motor_1, 0,
+            motor_2_pwm, current_motor_2, 0,
             ramp_time / 2, step_interval
         )
 
     # Match production polarity handling through invert flags.
-    motor_1_dir.value = motor_forward_to_dir_value(1, dir_a)
-    motor_2_dir.value = motor_forward_to_dir_value(2, dir_b)
+    motor_1_dir.value = motor_forward_to_dir_value(1, forward_motor_1)
+    motor_2_dir.value = motor_forward_to_dir_value(2, forward_motor_2)
 
-    target_a = _apply_speed_scale(speed_a, 'A')
-    target_b = _apply_speed_scale(speed_b, 'B')
-    current_a, current_b = _ramp_pwm_dual(
-        motor_1_pwm, current_a, target_a,
-        motor_2_pwm, current_b, target_b,
+    target_motor_1 = _apply_speed_scale(speed_motor_1, 'A')
+    target_motor_2 = _apply_speed_scale(speed_motor_2, 'B')
+    current_motor_1, current_motor_2 = _ramp_pwm_dual(
+        motor_1_pwm, current_motor_1, target_motor_1,
+        motor_2_pwm, current_motor_2, target_motor_2,
         ramp_time, step_interval
     )
 
-    state_a['speed'] = current_a
-    state_a['direction'] = dir_a
-    state_b['speed'] = current_b
-    state_b['direction'] = dir_b
+    state_motor_1['speed'] = current_motor_1
+    state_motor_1['direction'] = forward_motor_1
+    state_motor_2['speed'] = current_motor_2
+    state_motor_2['direction'] = forward_motor_2
 
 
 def stop():
