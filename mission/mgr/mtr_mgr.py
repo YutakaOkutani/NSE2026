@@ -64,18 +64,20 @@ from mission.const import (
     PHASE2_RAMP_TIME,
     PHASE3_FORWARD_RAMP_TIME,
     PHASE3_FORWARD_SPEED,
+    PHASE3_GPS_ARC_BASE_SPEED,
+    PHASE3_GPS_ARC_KP,
+    PHASE3_GPS_ARC_MAX_DELTA,
+    PHASE3_GPS_ARC_MAX_HOLD_SEC,
+    PHASE3_GPS_ARC_MIN_DELTA,
     PHASE3_GPS_FALLBACK_DEADBAND_DEG,
-    PHASE3_GPS_FALLBACK_TURN_SCALE,
     PHASE3_HEADING_DEADBAND_DEG,
     PHASE3_BNO_TRUST_MAX_JUMP_DEG,
     PHASE3_BNO_TRUST_MAX_OFFSET_DEG,
     PHASE3_BNO_TRUST_MAX_STALE_SEC,
-    PHASE3_LARGE_ERROR_DEG,
-    PHASE3_LARGE_ERROR_INNER_SPEED,
-    PHASE3_LARGE_ERROR_OUTER_SPEED,
     PHASE3_MAG_STUCK_MIN_DELTA_DEG,
     PHASE3_MAG_STUCK_TIMEOUT_SEC,
     PHASE3_MOTOR_LOOP_INTERVAL,
+    PHASE3_NO_HEADING_SPEED,
     PHASE3_NO_HEADING_TIMEOUT_SEC,
     PHASE3_PIVOT_THRESHOLD_DEG,
     PHASE3_PIVOT_SPEED,
@@ -236,10 +238,10 @@ class MotorManager:
 
     def _phase3_heading(self, snapshot):
         # Phase3 policy:
-        # - Use GPS-derived course to learn an IMU alignment anchor.
-        # - Once anchored, use BNO for high-rate steering; GPS course is too sparse
-        #   and noisy at sub-meter deltas to drive the motors directly.
-        # Raw mag-only steering was the main source of large snakes and in-place spins.
+        # - A verified BNO/GPS alignment enables high-rate BNO steering.
+        # - Otherwise use GPS course only; never add an unverified BNO offset.
+        # GPS-only motor control uses forward arcs below so that it keeps
+        # producing displacement from which the next GPS course can be measured.
         gps_heading = None
         if snapshot.get("gps_heading_valid", False):
             gps_heading = self._normalize_heading_deg(snapshot.get("gps_heading"))
@@ -266,14 +268,6 @@ class MotorManager:
             self._phase3_last_heading_trust = 0.45
             return gps_heading, "GPS_PRIMARY"
 
-        if snapshot.get("angle_valid", False) and math.isfinite(angle):
-            offset = self._normalize_heading_deg(getattr(self, "bno_heading_offset_deg", 0.0))
-            if offset is None:
-                offset = 0.0
-            fallback_heading = self._normalize_heading_deg(angle + offset)
-            if fallback_heading is not None:
-                self._phase3_last_heading_trust = 0.25
-                return fallback_heading, "BNO_FALLBACK"
         if snapshot.get("gps_heading_valid", False):
             self._phase3_last_heading_trust = 0.0
             return None, "GPS_PARSE_FAIL"
@@ -295,7 +289,7 @@ class MotorManager:
             return False
         if not getattr(self, "bno_heading_offset_valid", False):
             return False
-        if not getattr(self, "bno_heading_offset_verified", True):
+        if not getattr(self, "bno_heading_offset_verified", False):
             return False
         offset = self._normalize_heading_deg(getattr(self, "bno_heading_offset_deg", 0.0))
         if offset is None:
@@ -352,6 +346,127 @@ class MotorManager:
         outer = self._clamp_percent(straight - (straight - outer_legacy) * scale)
         inner = self._clamp_percent(straight - (straight - inner_legacy) * scale)
         return straight, outer, inner
+
+    def _phase3_gps_arc_speeds(self, heading_error_deg):
+        """Return a gentle forward-only arc for sparse GPS course feedback."""
+        magnitude = abs(float(heading_error_deg))
+        delta = min(
+            float(PHASE3_GPS_ARC_MAX_DELTA),
+            max(float(PHASE3_GPS_ARC_MIN_DELTA), magnitude * float(PHASE3_GPS_ARC_KP)),
+        )
+        base = float(PHASE3_GPS_ARC_BASE_SPEED)
+        fast = self._clamp_percent(base + delta / 2.0)
+        slow = self._clamp_percent(base - delta / 2.0)
+        if heading_error_deg > 0.0:
+            return fast, slow
+        return slow, fast
+
+    def _drive_phase3_navigation(self, snapshot, target_heading, now=None):
+        """Apply one Phase3 motor decision and return heading diagnostics."""
+        if now is None:
+            now = time.time()
+        nav_heading, heading_source = self._phase3_heading(snapshot)
+        if nav_heading is None:
+            if self.phase3_no_heading_start is None:
+                self.phase3_no_heading_start = now
+            elapsed = now - self.phase3_no_heading_start
+            if elapsed <= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
+                probe_speed = self._clamp_percent(PHASE3_NO_HEADING_SPEED)
+                self.set_motors(
+                    probe_speed,
+                    True,
+                    probe_speed,
+                    True,
+                    ramp_time=PHASE3_FORWARD_RAMP_TIME,
+                    cmd_type="phase3_gps_probe",
+                )
+            else:
+                self.stop_motors()
+            return nav_heading, heading_source, None
+
+        self.phase3_no_heading_start = None
+        diff = self._angle_diff_deg(target_heading, nav_heading)
+        if heading_source.startswith("GPS"):
+            try:
+                gps_fix_seq = int(snapshot.get("gps_fix_seq", 0))
+            except (TypeError, ValueError):
+                gps_fix_seq = 0
+            if gps_fix_seq != getattr(self, "_phase3_gps_arc_fix_seq", None):
+                self._phase3_gps_arc_fix_seq = gps_fix_seq
+                self._phase3_gps_arc_started_at = now
+
+            if abs(diff) <= float(PHASE3_GPS_FALLBACK_DEADBAND_DEG):
+                straight = self._clamp_percent(PHASE3_FORWARD_SPEED)
+                self.set_motors(
+                    straight,
+                    True,
+                    straight,
+                    True,
+                    ramp_time=PHASE3_FORWARD_RAMP_TIME,
+                    cmd_type="phase3_gps_forward",
+                )
+            elif (
+                now - float(getattr(self, "_phase3_gps_arc_started_at", now))
+                > float(PHASE3_GPS_ARC_MAX_HOLD_SEC)
+            ):
+                probe_speed = self._clamp_percent(PHASE3_NO_HEADING_SPEED)
+                self.set_motors(
+                    probe_speed,
+                    True,
+                    probe_speed,
+                    True,
+                    ramp_time=PHASE3_FORWARD_RAMP_TIME,
+                    cmd_type="phase3_gps_probe",
+                )
+            else:
+                left_speed, right_speed = self._phase3_gps_arc_speeds(diff)
+                self.set_motors(
+                    left_speed,
+                    True,
+                    right_speed,
+                    True,
+                    ramp_time=PHASE3_TURN_RAMP_TIME,
+                    cmd_type="phase3_gps_arc",
+                )
+            return nav_heading, heading_source, diff
+
+        straight_speed, turn_outer, turn_inner = self._phase3_legacy_drive_speeds()
+        if abs(diff) <= float(PHASE3_HEADING_DEADBAND_DEG):
+            self.set_motors(
+                straight_speed,
+                True,
+                straight_speed,
+                True,
+                ramp_time=PHASE3_FORWARD_RAMP_TIME,
+                cmd_type="phase3_bno_forward",
+            )
+        elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
+            turn_side = "right" if diff > 0 else "left"
+            self._set_forward_pivot_turn(
+                turn_side,
+                speed_outer=float(PHASE3_PIVOT_SPEED),
+                cmd_type="phase3_bno_pivot",
+                ramp_time=PHASE3_TURN_RAMP_TIME,
+            )
+        elif diff > 0:
+            self.set_motors(
+                turn_outer,
+                True,
+                turn_inner,
+                True,
+                ramp_time=PHASE3_TURN_RAMP_TIME,
+                cmd_type="phase3_bno_turn",
+            )
+        else:
+            self.set_motors(
+                turn_inner,
+                True,
+                turn_outer,
+                True,
+                ramp_time=PHASE3_TURN_RAMP_TIME,
+                cmd_type="phase3_bno_turn",
+            )
+        return nav_heading, heading_source, diff
 
     def _reset_phase45_camera_track(self):
         self.phase45_filtered_cone_dir = None
@@ -501,79 +616,7 @@ class MotorManager:
                         self.stop_motors()
                         time.sleep(MOTOR_IDLE_SLEEP)
                         continue
-                    target_heading = direction
-                    nav_heading, heading_source = self._phase3_heading(snapshot)
-                    if nav_heading is not None:
-                        self.phase3_no_heading_start = None
-                        diff = self._angle_diff_deg(target_heading, nav_heading)
-                        using_gps_fallback = heading_source.startswith("GPS")
-                        heading_deadband = (
-                            PHASE3_GPS_FALLBACK_DEADBAND_DEG if using_gps_fallback else PHASE3_HEADING_DEADBAND_DEG
-                        )
-                        turn_scale = PHASE3_GPS_FALLBACK_TURN_SCALE if using_gps_fallback else 1.0
-                        straight_speed, turn_outer, turn_inner = self._phase3_legacy_drive_speeds(turn_scale=turn_scale)
-                        if abs(diff) <= heading_deadband:
-                            self.set_motors(
-                                straight_speed,
-                                True,
-                                straight_speed,
-                                True,
-                                ramp_time=PHASE3_FORWARD_RAMP_TIME,
-                                cmd_type="phase3_gps_forward",
-                            )
-                        elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
-                            # Compass heading increases clockwise: a positive
-                            # target error therefore requires a right turn.
-                            turn_side = "right" if diff > 0 else "left"
-                            self._set_forward_pivot_turn(
-                                turn_side,
-                                speed_outer=float(PHASE3_PIVOT_SPEED),
-                                cmd_type="phase3_gps_pivot",
-                                ramp_time=PHASE3_TURN_RAMP_TIME,
-                            )
-                        else:
-                            turn_fast = turn_outer
-                            turn_slow = turn_inner
-                            if diff > 0:
-                                self.set_motors(
-                                    turn_fast,
-                                    True,
-                                    turn_slow,
-                                    True,
-                                    ramp_time=PHASE3_TURN_RAMP_TIME,
-                                    cmd_type="phase3_gps_turn",
-                                )
-                            else:
-                                self.set_motors(
-                                    turn_slow,
-                                    True,
-                                    turn_fast,
-                                    True,
-                                    ramp_time=PHASE3_TURN_RAMP_TIME,
-                                    cmd_type="phase3_gps_turn",
-                                )
-                    else:
-                        now = time.time()
-                        if self.phase3_no_heading_start is None:
-                            self.phase3_no_heading_start = now
-                        elapsed = now - self.phase3_no_heading_start
-                        phase3_speed = self._clamp_percent(PHASE3_NO_HEADING_SPEED)
-                        turn_bias = float(PHASE3_NO_HEADING_TURN_BIAS)
-                        cycle = elapsed % (float(PHASE3_NO_HEADING_TURN_INTERVAL) * 2.0)
-                        if cycle < float(PHASE3_NO_HEADING_TURN_INTERVAL):
-                            left_speed = self._clamp_percent(phase3_speed)
-                            right_speed = self._clamp_percent(phase3_speed - turn_bias)
-                        else:
-                            left_speed = self._clamp_percent(phase3_speed - turn_bias)
-                            right_speed = self._clamp_percent(phase3_speed)
-                        self.set_motors(
-                            left_speed,
-                            True,
-                            right_speed,
-                            True,
-                            ramp_time=PHASE3_FORWARD_RAMP_TIME,
-                            cmd_type="phase3_no_heading_search",
-                        )
+                    self._drive_phase3_navigation(snapshot, direction)
 
                 if phase in (Phase.PHASE4, Phase.PHASE5):
                     if not self._phase45_camera_track_step(snapshot):

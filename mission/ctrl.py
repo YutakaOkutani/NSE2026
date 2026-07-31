@@ -10,6 +10,7 @@ from mission.const import (
     DEFAULT_BNO_CALIB,
     DEFAULT_VECTOR3,
     DEVICE_KEYS,
+    HEADING_OFFSET_LEARN_BOOTSTRAP_MAX_RESIDUAL_DEG,
     HEADING_OFFSET_LEARN_BOOTSTRAP_SAMPLES,
     HEADING_OFFSET_LEARN_MAX_ABS_OFFSET_DEG,
     HEADING_OFFSET_LEARN_MAX_RESIDUAL_DEG,
@@ -206,6 +207,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase4_detect_confirm_marker = None
         self.bno_heading_offset_deg = 0.0
         self.bno_heading_offset_valid = False
+        self.bno_heading_offset_verified = False
         self.bno_heading_offset_candidate_deg = None
         self.bno_heading_offset_candidate_count = 0
         self._heading_offset_last_gps_fix_seq = 0
@@ -363,10 +365,14 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
                 if not getattr(self, "phase3_heading_entry_ready", False):
                     fallback_offset = float(getattr(self, "bno_heading_offset_candidate_deg", 0.0) or 0.0)
                     self.bno_heading_offset_deg = fallback_offset
-                    self.bno_heading_offset_valid = True
-                    self.phase2_heading_quality_valid = True
+                    self.bno_heading_offset_valid = False
+                    self.bno_heading_offset_verified = False
+                    self.phase2_heading_quality_valid = False
                     self.phase3_heading_entry_ready = True
-                    print(f"Phase2 timeout: forcing Phase3 with fallback offset ({fallback_offset:.1f} deg)")
+                    print(
+                        "Phase2 timeout: forcing Phase3 in GPS-only mode "
+                        f"(unverified candidate={fallback_offset:.1f} deg)"
+                    )
         print(
             f"{current_phase.name} cumulative timeout ({phase_elapsed:.1f}s / {phase_budget:.1f}s): "
             f"forcing {next_phase.name}"
@@ -498,7 +504,14 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         if baseline < float(GPS_HEADING_BASELINE_MIN_DIST):
             return False
         last_cmd = str(getattr(self, "last_motor_command", {}).get("type", ""))
-        if last_cmd not in ("phase3_gps_forward", "phase2_escape_forward", "phase2_offset_heading_hold_straight", "phase2_offset_forward"):
+        if last_cmd not in (
+            "phase3_gps_forward",
+            "phase3_gps_probe",
+            "phase3_bno_forward",
+            "phase2_escape_forward",
+            "phase2_offset_heading_hold_straight",
+            "phase2_offset_forward",
+        ):
             try:
                 heading_diff = abs(float(snapshot.get("heading_diff", 180.0)))
             except (TypeError, ValueError):
@@ -566,7 +579,11 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         valid_attr = f"{prefix}_heading_offset_valid"
         candidate_attr = f"{prefix}_heading_offset_candidate_deg"
         count_attr = f"{prefix}_heading_offset_candidate_count"
-        residual_limit = max(1.0, float(HEADING_OFFSET_LEARN_MAX_RESIDUAL_DEG))
+        update_residual_limit = max(1.0, float(HEADING_OFFSET_LEARN_MAX_RESIDUAL_DEG))
+        bootstrap_residual_limit = max(
+            1.0,
+            float(HEADING_OFFSET_LEARN_BOOTSTRAP_MAX_RESIDUAL_DEG),
+        )
 
         if getattr(self, valid_attr, False):
             is_verified = bool(getattr(self, f"{prefix}_heading_offset_verified", False))
@@ -575,7 +592,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
                 if current_offset is None:
                     return
                 residual = abs(self._angle_diff_deg(observed_offset, current_offset))
-                if residual > residual_limit:
+                if residual > update_residual_limit:
                     return
                 offset_delta = self._angle_diff_deg(observed_offset, current_offset)
                 max_step = max(1.0, float(PHASE3_BNO_GPS_OFFSET_MAX_STEP_DEG))
@@ -596,7 +613,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             return
 
         residual = abs(self._angle_diff_deg(observed_offset, candidate))
-        if residual > residual_limit:
+        if residual > bootstrap_residual_limit:
             setattr(self, candidate_attr, observed_offset)
             setattr(self, count_attr, 1)
             return
@@ -609,7 +626,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         setattr(self, candidate_attr, candidate)
         setattr(self, count_attr, candidate_count)
 
-        if candidate_count >= 3:
+        if candidate_count >= int(HEADING_OFFSET_LEARN_BOOTSTRAP_SAMPLES):
             setattr(self, offset_attr, candidate)
             setattr(self, valid_attr, True)
             setattr(self, f"{prefix}_heading_offset_verified", True)

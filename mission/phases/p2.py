@@ -58,6 +58,39 @@ from mission.phases.base import BasePhaseHandler
 
 class Phase2Handler(BasePhaseHandler):
     @staticmethod
+    def _transition_to_phase3_gps_only(controller, now, reason, candidate=None):
+        if candidate is not None:
+            controller.bno_heading_offset_deg = float(candidate)
+        controller.bno_heading_offset_valid = False
+        controller.bno_heading_offset_verified = False
+        # Phase2 samples failed the alignment-quality gate. Do not let their
+        # accumulated count shortcut Phase3's independent online verification.
+        controller.bno_heading_offset_candidate_deg = None
+        controller.bno_heading_offset_candidate_count = 0
+        controller.phase2_heading_quality_valid = False
+        controller.phase3_heading_entry_ready = True
+        controller.phase2_offset_reject_reason = f"gps_only:{reason}"
+        print(
+            f"Phase2: BNO/GPS alignment not verified ({reason}) -> "
+            "Phase3 GPS-only navigation"
+        )
+        controller.st.update_navigation(
+            phase=int(Phase.PHASE3),
+            bno_offset_deg=float(getattr(controller, "bno_heading_offset_deg", 0.0)),
+            bno_offset_valid=False,
+        )
+        controller.time_phase3_start = now
+
+    @staticmethod
+    def _has_usable_gps_leg(controller):
+        return (
+            float(getattr(controller, "phase2_offset_distance_m", 0.0))
+            >= float(PHASE2_OFFSET_MIN_DISTANCE_M)
+            and float(getattr(controller, "phase2_offset_path_efficiency", 0.0))
+            >= float(PHASE2_OFFSET_MIN_PATH_EFFICIENCY)
+        )
+
+    @staticmethod
     def _normalize_heading(value):
         try:
             value = float(value)
@@ -219,22 +252,12 @@ class Phase2Handler(BasePhaseHandler):
         controller.phase2_offset_stage_retry_count += 1
         controller.phase2_offset_attempt_count += 1
         if controller.phase2_offset_stage_retry_count > int(PHASE2_OFFSET_MAX_RETRIES):
-            fallback_offset = float(getattr(controller, "bno_heading_offset_candidate_deg", 0.0) or 0.0)
-            controller.bno_heading_offset_deg = fallback_offset
-            controller.bno_heading_offset_valid = True
-            controller.bno_heading_offset_verified = False
-            controller.phase2_heading_quality_valid = True
-            controller.phase3_heading_entry_ready = True
-            controller.phase2_offset_reject_reason = f"retry_exhausted_fallback:{reason}"
-            print(
-                f"Phase2: retry limit reached ({reason}) -> fallback offset ({fallback_offset:.1f} deg) -> Phase3"
+            cls._transition_to_phase3_gps_only(
+                controller,
+                now,
+                f"retry_exhausted:{reason}",
+                getattr(controller, "bno_heading_offset_candidate_deg", None),
             )
-            controller.st.update_navigation(
-                phase=int(Phase.PHASE3),
-                bno_offset_deg=float(controller.bno_heading_offset_deg),
-                bno_offset_valid=True,
-            )
-            controller.time_phase3_start = now
             return
         controller.phase2_offset_mode = PHASE2_OFFSET_MODE_REORIENT
         controller.phase2_offset_mode_start_time = now
@@ -408,26 +431,13 @@ class Phase2Handler(BasePhaseHandler):
             controller.phase2_heading_quality_valid = True
             return
 
-        offset_candidate = estimate.get("offset_deg")
-        if offset_candidate is not None:
-            controller.bno_heading_offset_deg = float(offset_candidate)
-            controller.bno_heading_offset_valid = True
-            controller.bno_heading_offset_verified = False
-            controller.phase2_heading_quality_valid = True
-            controller.phase3_heading_entry_ready = True
-            print(
-                f"Phase2: leg completed ({estimate.get('reason', 'best_effort')}) -> "
-                f"best-effort offset ({float(offset_candidate):.1f} deg) -> proceeding to Phase3"
+        if estimate["distance_m"] >= float(PHASE2_OFFSET_MAX_DISTANCE_M):
+            cls._transition_to_phase3_gps_only(
+                controller,
+                time.time(),
+                estimate.get("reason", "alignment_unverified"),
+                estimate.get("offset_deg"),
             )
-            controller.st.update_navigation(
-                phase=int(Phase.PHASE3),
-                bno_offset_deg=float(controller.bno_heading_offset_deg),
-                bno_offset_valid=True,
-            )
-            controller.time_phase3_start = time.time()
-            return
-
-        cls._begin_offset_retry(controller, time.time(), estimate["reason"])
 
     @staticmethod
     def _enter_stage(controller, stage, now, snapshot=None):
@@ -440,6 +450,7 @@ class Phase2Handler(BasePhaseHandler):
 
         controller.bno_heading_offset_deg = 0.0
         controller.bno_heading_offset_valid = False
+        controller.bno_heading_offset_verified = False
         controller.bno_heading_offset_candidate_deg = None
         controller.bno_heading_offset_candidate_count = 0
         if snapshot is None:
@@ -587,7 +598,15 @@ class Phase2Handler(BasePhaseHandler):
                         if controller.phase2_offset_near_goal_active
                         else "gps_progress_stalled"
                     )
-                    self._begin_offset_retry(controller, now, reason)
+                    if self._has_usable_gps_leg(controller):
+                        self._transition_to_phase3_gps_only(
+                            controller,
+                            now,
+                            controller.phase2_offset_reject_reason or reason,
+                            controller.bno_heading_offset_candidate_deg,
+                        )
+                    else:
+                        self._begin_offset_retry(controller, now, reason)
                     return
             controller.st.update_navigation(
                 bno_offset_deg=float(controller.bno_heading_offset_deg),
@@ -618,11 +637,19 @@ class Phase2Handler(BasePhaseHandler):
                     controller.phase2_offset_mode_start_time = now
                     controller.phase2_entry_ready_count = 0
                 else:
-                    self._begin_offset_retry(controller, now, "leg_timeout")
-                    print(
-                        "Phase2: offset leg time limit -> forward reorient retry "
-                        f"#{controller.phase2_offset_stage_retry_count}"
-                    )
+                    if self._has_usable_gps_leg(controller):
+                        self._transition_to_phase3_gps_only(
+                            controller,
+                            now,
+                            controller.phase2_offset_reject_reason or "leg_timeout",
+                            controller.bno_heading_offset_candidate_deg,
+                        )
+                    else:
+                        self._begin_offset_retry(controller, now, "leg_timeout")
+                        print(
+                            "Phase2: offset leg time limit -> forward reorient retry "
+                            f"#{controller.phase2_offset_stage_retry_count}"
+                        )
                 return
             return
 
@@ -638,4 +665,3 @@ def run_standalone():
 
 if __name__ == "__main__":
     run_standalone()
-

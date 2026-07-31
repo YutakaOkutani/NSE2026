@@ -17,6 +17,7 @@ MotorManager = mtr_mgr_under_test.MotorManager
 class _HeadingOnlyController(MotorManager):
     def __init__(self):
         self.bno_heading_offset_valid = False
+        self.bno_heading_offset_verified = False
         self.bno_heading_offset_deg = 0.0
         self.mag_heading_offset_valid = False
         self.mag_heading_offset_deg = 0.0
@@ -24,6 +25,7 @@ class _HeadingOnlyController(MotorManager):
         self.phase2_offset_reference_bno_deg = None
         self.phase2_offset_heading_error_deg = 0.0
         self.phase2_offset_turn_target_deg = None
+        self.phase3_no_heading_start = None
         self.motor_commands = []
 
     def set_motors(self, *args, **kwargs):
@@ -112,6 +114,7 @@ class Phase3HeadingTest(unittest.TestCase):
     def test_uses_bno_after_gps_alignment_is_valid(self):
         ctrl = _HeadingOnlyController()
         ctrl.bno_heading_offset_valid = True
+        ctrl.bno_heading_offset_verified = True
         ctrl.bno_heading_offset_deg = 10.0
 
         heading, source = ctrl._phase3_heading(
@@ -161,39 +164,83 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertIsNone(heading)
         self.assertNotEqual(source, "MAG_ALIGNED")
 
-    def test_phase3_large_heading_error_uses_pivot_turn(self):
+    def test_unverified_bno_is_not_used_when_gps_course_is_missing(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.bno_heading_offset_valid = True
+        ctrl.bno_heading_offset_verified = False
+        ctrl.bno_heading_offset_deg = 120.0
+
+        heading, source = ctrl._phase3_heading(
+            {
+                "gps_heading_valid": False,
+                "angle_valid": True,
+                "angle": 30.0,
+            }
+        )
+
+        self.assertIsNone(heading)
+        self.assertEqual(source, "NO_HEADING_SOURCE")
+
+    def test_phase3_large_gps_error_uses_forward_arc_not_pivot(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase3_heading_entry_ready = True
+
+        snapshot = {
+            "gps_heading_valid": True,
+            "gps_heading": 280.0,
+            "gps_fix_seq": 10,
+            "angle_valid": False,
+            "angle": 0.0,
+        }
+
+        _, source, diff = ctrl._drive_phase3_navigation(snapshot, 90.0, now=10.0)
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual(source, "GPS_PRIMARY")
+        self.assertAlmostEqual(diff, 170.0)
+        self.assertEqual(kwargs["cmd_type"], "phase3_gps_arc")
+        self.assertTrue(args[1])
+        self.assertTrue(args[3])
+        self.assertGreater(args[0], 0.0)
+        self.assertGreater(args[2], 0.0)
+        self.assertGreater(args[0], args[2])
+
+    def test_phase3_missing_heading_probes_straight_then_stops(self):
+        ctrl = _HeadingOnlyController()
+        snapshot = {
+            "gps_heading_valid": False,
+            "angle_valid": True,
+            "angle": 30.0,
+        }
+
+        ctrl._drive_phase3_navigation(snapshot, 90.0, now=10.0)
+        first_args, first_kwargs = ctrl.motor_commands[-1]
+        ctrl._drive_phase3_navigation(snapshot, 90.0, now=14.0)
+        _, second_kwargs = ctrl.motor_commands[-1]
+
+        self.assertEqual(first_kwargs["cmd_type"], "phase3_gps_probe")
+        self.assertEqual(first_args[0], first_args[2])
+        self.assertEqual(second_kwargs["cmd_type"], "stop")
+
+    def test_phase3_large_verified_bno_error_uses_pivot_turn(self):
         ctrl = _HeadingOnlyController()
         ctrl.phase3_heading_entry_ready = True
         ctrl.bno_heading_offset_valid = True
+        ctrl.bno_heading_offset_verified = True
         ctrl.bno_heading_offset_deg = 0.0
 
-        # Snapshot with angle = 280, target = 90 => normalized diff = +170
-        # (large clockwise/right-turn error).
         snapshot = {
-            "gps_detect": 1,
-            "lat": 35.0,
-            "lng": 139.0,
-            "gps_heading_valid": True,
-            "gps_heading": 280.0,
-            "gps_speed_mps": 0.5,
+            "gps_heading_valid": False,
             "angle_valid": True,
             "angle": 280.0,
         }
 
-        # Simulate motor control loop in Phase 3
-        nav_heading, heading_source = ctrl._phase3_heading(snapshot)
-        diff = ctrl._angle_diff_deg(90.0, nav_heading)
-        turn_side = "right" if diff > 0 else "left"
-        ctrl._set_forward_pivot_turn(
-            turn_side,
-            speed_outer=34,
-            cmd_type="phase3_gps_pivot",
-            speed_inner=0.0,
-            ramp_time=0.1,
-        )
+        _, source, diff = ctrl._drive_phase3_navigation(snapshot, 90.0, now=10.0)
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual(kwargs["cmd_type"], "phase3_gps_pivot")
+        self.assertEqual(source, "BNO_ALIGNED")
+        self.assertAlmostEqual(diff, 170.0)
+        self.assertEqual(kwargs["cmd_type"], "phase3_bno_pivot")
         # Positive compass-heading error requires a right turn: logical left
         # wheel drives while the logical right wheel is stopped.
         self.assertEqual(args[0], 34)

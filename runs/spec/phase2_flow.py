@@ -209,13 +209,32 @@ class Phase2FlowTest(unittest.TestCase):
         self.assertAlmostEqual(estimate["course_deg"], 0.0, delta=0.5)
         self.assertAlmostEqual(estimate["offset_deg"], 90.0, delta=0.5)
 
+    def test_interval_estimator_accepts_field_realistic_bno_drift(self):
+        headings = (254.0, 260.0, 266.0, 274.0, 280.0, 286.0, 286.0)
+        samples = [
+            {
+                "gps_fix_seq": index + 1,
+                "lat": 35.0 + index * 0.000005,
+                "lng": 139.0,
+                "bno_heading": heading,
+            }
+            for index, heading in enumerate(headings)
+        ]
+
+        estimate = Phase2Handler._estimate_offset_segment(samples)
+
+        self.assertTrue(estimate["valid"])
+        self.assertGreater(estimate["bno_spread_deg"], 12.0)
+        self.assertLessEqual(estimate["bno_spread_deg"], 20.0)
+        self.assertLessEqual(estimate["subsegment_diff_deg"], 25.0)
+
     def test_interval_estimator_rejects_unstable_bno_heading(self):
         samples = [
             {
                 "gps_fix_seq": index + 1,
                 "lat": 35.0 + index * 0.000012,
                 "lng": 139.0,
-                "bno_heading": 250.0 if index % 2 == 0 else 290.0,
+                "bno_heading": 245.0 if index % 2 == 0 else 295.0,
             }
             for index in range(8)
         ]
@@ -254,8 +273,10 @@ class Phase2FlowTest(unittest.TestCase):
             Phase2Handler().execute(ctrl, {"gps_fix_seq": 20, "angle_valid": True, "angle": 90.0})
 
         self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE3))
-        self.assertTrue(ctrl.bno_heading_offset_valid)
+        self.assertFalse(ctrl.bno_heading_offset_valid)
+        self.assertFalse(ctrl.bno_heading_offset_verified)
         self.assertTrue(ctrl.phase3_heading_entry_ready)
+        self.assertIn("gps_only:", ctrl.phase2_offset_reject_reason)
 
     def test_first_offset_timeout_retries_with_forward_reorient(self):
         ctrl = _Controller()

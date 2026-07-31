@@ -85,6 +85,19 @@ class _RunHarness:
         self.shutdown_reasons.append(reason)
 
 
+class _OffsetLearningHarness:
+    _normalize_heading_deg = CanSatController._normalize_heading_deg
+    _angle_diff_deg = CanSatController._angle_diff_deg
+    _update_heading_offset_estimate = CanSatController._update_heading_offset_estimate
+
+    def __init__(self):
+        self.bno_heading_offset_deg = 0.0
+        self.bno_heading_offset_valid = False
+        self.bno_heading_offset_verified = False
+        self.bno_heading_offset_candidate_deg = None
+        self.bno_heading_offset_candidate_count = 0
+
+
 class ControllerExceptionSafetyTest(unittest.TestCase):
     def test_startup_failures_always_request_shutdown(self):
         for stage in ("setup", "led", "radio", "phase"):
@@ -93,6 +106,30 @@ class ControllerExceptionSafetyTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, f"{stage} failed"):
                     harness.run(start_phase=Phase.PHASE0)
                 self.assertEqual(harness.shutdown_reasons, ["RUN_EXIT"])
+
+    def test_unverified_offset_requires_six_consistent_observations(self):
+        harness = _OffsetLearningHarness()
+
+        harness._update_heading_offset_estimate("bno", 100.0)
+        harness._update_heading_offset_estimate("bno", 180.0)
+        self.assertEqual(harness.bno_heading_offset_candidate_count, 1)
+        self.assertFalse(harness.bno_heading_offset_verified)
+
+        for _ in range(5):
+            harness._update_heading_offset_estimate("bno", 180.0)
+
+        self.assertTrue(harness.bno_heading_offset_verified)
+        self.assertAlmostEqual(harness.bno_heading_offset_deg, 180.0)
+
+    def test_verified_offset_can_follow_large_field_drift_in_capped_steps(self):
+        harness = _OffsetLearningHarness()
+        harness.bno_heading_offset_deg = 100.0
+        harness.bno_heading_offset_valid = True
+        harness.bno_heading_offset_verified = True
+
+        harness._update_heading_offset_estimate("bno", 180.0)
+
+        self.assertAlmostEqual(harness.bno_heading_offset_deg, 109.0)
 
 
 if __name__ == "__main__":
