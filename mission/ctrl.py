@@ -92,6 +92,7 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
 
         self.devices = {key: None for key in DEVICE_KEYS}
         self.i2c_lock = threading.RLock()
+        self._log_lock = threading.Lock()
         self.led_blink_timer = 0
         self.searching_flag = False
         self.count_cone_lost = 0
@@ -259,6 +260,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             self.stop_motors()
         except Exception as exc:
             print(f"Emergency stop failed: {exc}")
+        try:
+            self.close_hardware()
+        except Exception as exc:
+            print(f"Hardware shutdown failed: {exc}")
         self._write_final_log_row()
 
     def _resolve_phase7_arrival_reason(self):
@@ -273,9 +278,14 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
 
     def _write_final_log_row(self):
         try:
-            with open(self.log_path, "a", newline="") as file_obj:
-                writer = csv.writer(file_obj)
-                self._append_log_row(writer, file_obj)
+            log_lock = getattr(self, "_log_lock", None)
+            if log_lock is None:
+                log_lock = threading.Lock()
+                self._log_lock = log_lock
+            with log_lock:
+                with open(self.log_path, "a", newline="") as file_obj:
+                    writer = csv.writer(file_obj)
+                    self._append_log_row(writer, file_obj)
         except Exception as exc:
             print(f"Final Log Error: {exc}")
 

@@ -47,6 +47,23 @@ from mission.const import (
 
 
 class HardwareManager:
+    def close_hardware(self):
+        """Release GPIO/camera resources so subset runners can exit cleanly."""
+        self._release_camera_detector()
+        closed_ids = set()
+        for key, device in list(self.devices.items()):
+            if device is None or id(device) in closed_ids:
+                continue
+            closed_ids.add(id(device))
+            try:
+                close_fn = getattr(device, "close", None)
+                if callable(close_fn):
+                    close_fn()
+            except Exception as exc:
+                print(f"Hardware close error ({key}): {exc}")
+            finally:
+                self.devices[key] = None
+
     def _bno_has_live_sample(self, bno):
         try:
             acc = bno.getAcc()

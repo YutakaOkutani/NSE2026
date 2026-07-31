@@ -287,11 +287,16 @@ class SensorManager:
 
     def log_thread(self):
         log_error_last_print = 0.0
-        while True:
+        while not bool(getattr(self, "_shutdown_requested", False)):
             try:
-                with open(self.log_path, "a", newline="") as file_obj:
-                    writer = csv.writer(file_obj)
-                    self._append_log_row(writer, file_obj)
+                log_lock = getattr(self, "_log_lock", None)
+                if log_lock is None:
+                    log_lock = threading.Lock()
+                    self._log_lock = log_lock
+                with log_lock:
+                    with open(self.log_path, "a", newline="") as file_obj:
+                        writer = csv.writer(file_obj)
+                        self._append_log_row(writer, file_obj)
             except Exception as exc:
                 now = time.time()
                 if now - log_error_last_print >= 1.0:
@@ -839,7 +844,7 @@ class SensorManager:
             diag["reopen_count"] += 1
             _set_gps_inactive_state()
 
-        while True:
+        while not bool(getattr(self, "_shutdown_requested", False)):
             try:
                 if serial_obj is None or not serial_obj.is_open:
                     diag["status"] = "REOPENING"
@@ -1023,7 +1028,7 @@ class SensorManager:
                 time.sleep(GPS_RECONNECT_SLEEP)
 
     def camera_thread(self):
-        while True:
+        while not bool(getattr(self, "_shutdown_requested", False)):
             current_phase = self.st.snapshot()["phase"]
             if current_phase in PHASES_CAMERA_ACTIVE:
                 t_start = time.time()
@@ -1038,7 +1043,7 @@ class SensorManager:
     def bno_thread(self):
         suspicious_bno_counter = 0
         next_bmp_read = 0.0
-        while True:
+        while not bool(getattr(self, "_shutdown_requested", False)):
             bno_data = None
             try:
                 bno_data = self.get_bno_data()
@@ -1099,7 +1104,7 @@ class SensorManager:
             time.sleep(DATA_SAMPLING_RATE)
 
     def sonar_thread(self):
-        while True:
+        while not bool(getattr(self, "_shutdown_requested", False)):
             try:
                 sonar_dist = self.get_sonar_data()
             except Exception as exc:

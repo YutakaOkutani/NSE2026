@@ -98,7 +98,47 @@ class _OffsetLearningHarness:
         self.bno_heading_offset_candidate_count = 0
 
 
+class _ShutdownHarness:
+    request_shutdown = CanSatController.request_shutdown
+
+    def __init__(self):
+        self._shutdown_requested = False
+        self.mission_end_reason = "RUNNING"
+        self.phase7_arrival_reason = "RUNNING"
+        self.actions = []
+        self.st = types.SimpleNamespace(snapshot=lambda: {"phase": int(Phase.PHASE4)})
+
+    def restore_mission_radio(self, reason):
+        self.actions.append(("radio", reason))
+
+    def stop_motors(self):
+        self.actions.append(("motors", "stop"))
+
+    def close_hardware(self):
+        self.actions.append(("hardware", "close"))
+
+    def _write_final_log_row(self):
+        self.actions.append(("log", "final"))
+
+
 class ControllerExceptionSafetyTest(unittest.TestCase):
+    def test_shutdown_stops_workers_and_releases_hardware_before_final_log(self):
+        harness = _ShutdownHarness()
+
+        harness.request_shutdown("PHASE_SUBSET_COMPLETED")
+
+        self.assertTrue(harness._shutdown_requested)
+        self.assertEqual(harness.mission_end_reason, "PHASE_SUBSET_COMPLETED")
+        self.assertEqual(
+            harness.actions,
+            [
+                ("radio", "shutdown_PHASE_SUBSET_COMPLETED"),
+                ("motors", "stop"),
+                ("hardware", "close"),
+                ("log", "final"),
+            ],
+        )
+
     def test_startup_failures_always_request_shutdown(self):
         for stage in ("setup", "led", "radio", "phase"):
             with self.subTest(stage=stage):

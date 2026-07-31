@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import types
 import unittest
 import importlib.util
@@ -50,6 +51,16 @@ class _LogOnlyController(SensorManager):
 
 
 class LogSchemaTest(unittest.TestCase):
+    def test_log_worker_does_not_write_after_shutdown(self):
+        ctrl = _LogOnlyController()
+        ctrl._shutdown_requested = True
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ctrl.log_path = str(Path(tmp_dir) / "after_shutdown.csv")
+
+            ctrl.log_thread()
+
+            self.assertFalse(Path(ctrl.log_path).exists())
+
     def test_log_header_and_row_lengths_match(self):
         ctrl = _LogOnlyController()
 
