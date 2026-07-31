@@ -3,22 +3,54 @@ import sys
 import time
 from pathlib import Path
 
-# Allow running this file directly (e.g. `python runs/motor_diag.py`) by adding
+# Allow running this file directly (e.g. `python runs/diag/motor.py`) by adding
 # the repository root to sys.path so `mission` can be imported.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mission.const import (
+    MANUAL_TURN_SPEED_RATIO,
     MOTOR_SPEED_OFFSET_1,
     MOTOR_SPEED_OFFSET_2,
     MOTOR_SPEED_SCALE_1,
     MOTOR_SPEED_SCALE_2,
+    PARACHUTE_SEPARATION_SPEED,
+    PHASE1_SOFTSTART_RAMP_TIME,
+    PHASE1_SOFTSTART_STEP,
+    PHASE2_CALIB_ARC_INNER_SPEED,
+    PHASE2_CALIB_ARC_OUTER_SPEED,
+    PHASE2_FORWARD_REORIENT_INNER_SPEED,
+    PHASE2_FORWARD_REORIENT_OUTER_SPEED,
+    PHASE2_OFFSET_CORRECTION_BASE_SPEED,
+    PHASE2_OFFSET_HOLD_MAX_DELTA,
+    PHASE2_OFFSET_SPEED,
+    PHASE2_RAMP_TIME,
+    PHASE2_SPEED,
+    PHASE3_FORWARD_RAMP_TIME,
+    PHASE3_FORWARD_SPEED,
+    PHASE3_GPS_ARC_BASE_SPEED,
+    PHASE3_GPS_ARC_MAX_DELTA,
+    PHASE3_LARGE_ERROR_INNER_SPEED,
+    PHASE3_LARGE_ERROR_OUTER_SPEED,
+    PHASE3_TURN_INNER_SPEED,
+    PHASE3_TURN_OUTER_SPEED,
+    PHASE3_TURN_RAMP_TIME,
+    PHASE4_ALIGN_FORWARD_SPEED,
+    PHASE4_ALIGN_INNER_SPEED,
+    PHASE4_ALIGN_PIVOT_SPEED,
+    PHASE4_MOTOR_RAMP_TIME,
+    PHASE5_BASE_SPEED,
+    PHASE5_MOTOR_RAMP_TIME,
+    PHASE5_TURN_CLAMP,
+    PHASE6_RAM_SPEED,
     PIN_EN1,
     PIN_EN2,
     PIN_PH1,
     PIN_PH2,
     PWM_FREQ,
+    SEARCH_ROTATION_INNER_SPEED,
+    SEARCH_ROTATION_SPEED,
 )
 from mission.motor_map import (
     get_manual_drive_pattern,
@@ -29,6 +61,8 @@ from mission.motor_map import (
 DEFAULT_SPEED = 100  # Default duty for manual control (0-100)
 SPEED_STEP = 5  # Duty adjustment step for interactive test (0-100)
 COMMAND_BUFFER_SEC = 0.25  # Delay before applying a new command to avoid regen spikes
+DEFAULT_RAMP_TIME = 0.6
+DEFAULT_STEP_INTERVAL = 0.05
 
 # gpiozero devices (created in setup())
 pin_factory = None
@@ -39,6 +73,256 @@ motor_2_dir = None
 motor_state = {
     'A': {'speed': 0.0, 'direction': 1},
     'B': {'speed': 0.0, 'direction': 1},
+}
+
+
+def _command(
+    label,
+    speed_left,
+    forward_left,
+    speed_right,
+    forward_right,
+    ramp_time,
+    step_interval=DEFAULT_STEP_INTERVAL,
+):
+    return {
+        "label": label,
+        "speed_left": float(speed_left),
+        "forward_left": bool(forward_left),
+        "speed_right": float(speed_right),
+        "forward_right": bool(forward_right),
+        "ramp_time": float(ramp_time),
+        "step_interval": float(step_interval),
+    }
+
+
+def _wasd_commands(
+    straight_speed,
+    turn_outer,
+    turn_inner,
+    ramp_straight,
+    ramp_turn=None,
+    step_interval=DEFAULT_STEP_INTERVAL,
+):
+    """Build logical-wheel WASD commands from one production output profile."""
+    if ramp_turn is None:
+        ramp_turn = ramp_straight
+    return {
+        "w": _command(
+            "Forward",
+            straight_speed,
+            True,
+            straight_speed,
+            True,
+            ramp_straight,
+            step_interval,
+        ),
+        "s": _command(
+            "Backward (diagnostic)",
+            straight_speed,
+            False,
+            straight_speed,
+            False,
+            ramp_straight,
+            step_interval,
+        ),
+        "a": _command(
+            "Left",
+            turn_inner,
+            True,
+            turn_outer,
+            True,
+            ramp_turn,
+            step_interval,
+        ),
+        "d": _command(
+            "Right",
+            turn_outer,
+            True,
+            turn_inner,
+            True,
+            ramp_turn,
+            step_interval,
+        ),
+    }
+
+
+def _straight_only_commands(speed, ramp_time, step_interval=DEFAULT_STEP_INTERVAL):
+    """Expose straight-only phases through WASD without hiding that A/D are diagnostic."""
+    turn_inner = float(speed) * float(MANUAL_TURN_SPEED_RATIO)
+    commands = _wasd_commands(
+        speed,
+        speed,
+        turn_inner,
+        ramp_time,
+        ramp_time,
+        step_interval,
+    )
+    commands["a"]["label"] = "Left (diagnostic; phase is straight-only)"
+    commands["d"]["label"] = "Right (diagnostic; phase is straight-only)"
+    return commands
+
+
+def _profile(name, description, commands):
+    return {
+        "name": name,
+        "description": description,
+        "commands": commands,
+    }
+
+
+_gps_arc_delta = float(PHASE3_GPS_ARC_MAX_DELTA)
+_gps_arc_outer = min(100.0, float(PHASE3_GPS_ARC_BASE_SPEED) + _gps_arc_delta / 2.0)
+_gps_arc_inner = max(0.0, float(PHASE3_GPS_ARC_BASE_SPEED) - _gps_arc_delta / 2.0)
+_phase5_outer = min(100.0, float(PHASE5_BASE_SPEED) + float(PHASE5_TURN_CLAMP))
+_phase5_inner = max(
+    float(PHASE5_BASE_SPEED) - float(PHASE5_TURN_CLAMP),
+    float(PHASE5_BASE_SPEED) * 0.55,
+)
+_phase2_offset_outer = min(
+    100.0,
+    float(PHASE2_OFFSET_CORRECTION_BASE_SPEED) + float(PHASE2_OFFSET_HOLD_MAX_DELTA),
+)
+_phase2_offset_inner = max(
+    0.0,
+    float(PHASE2_OFFSET_CORRECTION_BASE_SPEED) - float(PHASE2_OFFSET_HOLD_MAX_DELTA),
+)
+
+PHASE_DRIVE_PROFILES = {
+    "1": (
+        _profile(
+            "separation",
+            "P1 parachute separation; W is the production 100% output, A/D are diagnostic turns.",
+            _straight_only_commands(
+                PARACHUTE_SEPARATION_SPEED,
+                PHASE1_SOFTSTART_RAMP_TIME,
+                PHASE1_SOFTSTART_STEP,
+            ),
+        ),
+    ),
+    "2": (
+        _profile(
+            "escape",
+            "P2 parachute escape straight output; A/D use the manual ratio for field diagnosis.",
+            _straight_only_commands(PHASE2_SPEED, PHASE2_RAMP_TIME),
+        ),
+        _profile(
+            "calibration_arc",
+            "P2 magnetic-calibration arc; A/D reproduce the two alternating arc directions.",
+            _wasd_commands(
+                PHASE2_CALIB_ARC_OUTER_SPEED,
+                PHASE2_CALIB_ARC_OUTER_SPEED,
+                PHASE2_CALIB_ARC_INNER_SPEED,
+                PHASE2_RAMP_TIME,
+            ),
+        ),
+        _profile(
+            "offset_hold_max",
+            "P2 straight offset collection and its maximum heading correction.",
+            _wasd_commands(
+                PHASE2_OFFSET_SPEED,
+                _phase2_offset_outer,
+                _phase2_offset_inner,
+                PHASE2_RAMP_TIME,
+            ),
+        ),
+        _profile(
+            "reorient",
+            "P2 retry reorientation forward arc.",
+            _wasd_commands(
+                PHASE2_FORWARD_REORIENT_OUTER_SPEED,
+                PHASE2_FORWARD_REORIENT_OUTER_SPEED,
+                PHASE2_FORWARD_REORIENT_INNER_SPEED,
+                PHASE2_RAMP_TIME,
+            ),
+        ),
+    ),
+    "3": (
+        _profile(
+            "navigation",
+            "P3 verified-BNO straight and normal turn outputs.",
+            _wasd_commands(
+                PHASE3_FORWARD_SPEED,
+                PHASE3_TURN_OUTER_SPEED,
+                PHASE3_TURN_INNER_SPEED,
+                PHASE3_FORWARD_RAMP_TIME,
+                PHASE3_TURN_RAMP_TIME,
+            ),
+        ),
+        _profile(
+            "large_arc",
+            "P3 large-heading-error high-torque arc; both wheels stay powered.",
+            _wasd_commands(
+                PHASE3_FORWARD_SPEED,
+                PHASE3_LARGE_ERROR_OUTER_SPEED,
+                PHASE3_LARGE_ERROR_INNER_SPEED,
+                PHASE3_FORWARD_RAMP_TIME,
+                PHASE3_TURN_RAMP_TIME,
+            ),
+        ),
+        _profile(
+            "gps_arc_max",
+            "P3 GPS-only maximum correction and straight probe output.",
+            _wasd_commands(
+                PHASE3_FORWARD_SPEED,
+                _gps_arc_outer,
+                _gps_arc_inner,
+                PHASE3_FORWARD_RAMP_TIME,
+                PHASE3_TURN_RAMP_TIME,
+            ),
+        ),
+    ),
+    "4": (
+        _profile(
+            "search_arc",
+            "P4 configured camera-search arc; production normally uses the left direction.",
+            _wasd_commands(
+                SEARCH_ROTATION_SPEED,
+                SEARCH_ROTATION_SPEED,
+                SEARCH_ROTATION_INNER_SPEED,
+                PHASE4_MOTOR_RAMP_TIME,
+            ),
+        ),
+        _profile(
+            "camera_align",
+            "P4 configured camera-centering forward and alignment arc outputs.",
+            _wasd_commands(
+                PHASE4_ALIGN_FORWARD_SPEED,
+                PHASE4_ALIGN_PIVOT_SPEED,
+                PHASE4_ALIGN_INNER_SPEED,
+                PHASE4_MOTOR_RAMP_TIME,
+            ),
+        ),
+    ),
+    "5": (
+        _profile(
+            "approach",
+            "P5 cone-approach straight and maximum steering outputs.",
+            _wasd_commands(
+                PHASE5_BASE_SPEED,
+                _phase5_outer,
+                _phase5_inner,
+                PHASE5_MOTOR_RAMP_TIME,
+            ),
+        ),
+    ),
+    "6": (
+        _profile(
+            "final_ram",
+            "P6 final straight ram; A/D are diagnostic turns.",
+            _straight_only_commands(PHASE6_RAM_SPEED, DEFAULT_RAMP_TIME),
+        ),
+    ),
+    "7": (
+        _profile(
+            "stopped",
+            "P7 shutdown state; every WASD key keeps both motors stopped.",
+            {
+                key: _command("Stopped", 0.0, True, 0.0, True, 0.0)
+                for key in ("w", "a", "s", "d")
+            },
+        ),
+    ),
 }
 
 def setup():
@@ -255,6 +539,99 @@ def _apply_manual_drive_pattern(cmd, speed=DEFAULT_SPEED):
     return True
 
 
+def _normalize_phase(value):
+    phase = str(value or "manual").strip().lower()
+    if phase in ("0", "manual", "m"):
+        return "manual"
+    if phase.startswith("p"):
+        phase = phase[1:]
+    if phase in PHASE_DRIVE_PROFILES:
+        return phase
+    raise ValueError("phase must be manual/0 or 1 through 7")
+
+
+def _profile_index_for_name(phase, profile_name):
+    profiles = PHASE_DRIVE_PROFILES.get(phase, ())
+    if not profiles:
+        return 0
+    if profile_name is None:
+        return 0
+    wanted = str(profile_name).strip().lower()
+    for index, profile in enumerate(profiles):
+        if profile["name"].lower() == wanted:
+            return index
+    names = ", ".join(profile["name"] for profile in profiles)
+    raise ValueError(f"unknown P{phase} profile {profile_name!r}; choose one of: {names}")
+
+
+def get_phase_drive_pattern(phase, profile_index, cmd):
+    """Return one exact phase-profile command in logical left/right order."""
+    phase = _normalize_phase(phase)
+    if phase == "manual":
+        return None
+    profiles = PHASE_DRIVE_PROFILES[phase]
+    profile = profiles[int(profile_index) % len(profiles)]
+    return profile["commands"].get((cmd or "").lower())
+
+
+def _apply_phase_drive_pattern(phase, profile_index, cmd):
+    pattern = get_phase_drive_pattern(phase, profile_index, cmd)
+    if pattern is None:
+        return False
+    if pattern["speed_left"] <= 0.0 and pattern["speed_right"] <= 0.0:
+        stop()
+        return True
+    set_motors(
+        pattern["speed_left"],
+        int(pattern["forward_left"]),
+        pattern["speed_right"],
+        int(pattern["forward_right"]),
+        ramp_time=pattern["ramp_time"],
+        step_interval=pattern["step_interval"],
+    )
+    return True
+
+
+def _format_wheel(speed, forward):
+    direction = "F" if forward else "R"
+    return f"{float(speed):.0f}%{direction}"
+
+
+def _print_phase_profile(phase, profile_index):
+    if phase == "manual":
+        print("Mode: manual (existing variable-duty WASD control)")
+        return
+    profiles = PHASE_DRIVE_PROFILES[phase]
+    profile_index %= len(profiles)
+    profile = profiles[profile_index]
+    print(
+        f"Mode: P{phase}/{profile['name']} "
+        f"({profile_index + 1}/{len(profiles)}) - {profile['description']}"
+    )
+    for key in ("w", "a", "s", "d"):
+        command = profile["commands"][key]
+        print(
+            f"  {key.upper()}: {command['label']} "
+            f"L={_format_wheel(command['speed_left'], command['forward_left'])} "
+            f"R={_format_wheel(command['speed_right'], command['forward_right'])}"
+        )
+
+
+def print_profile_catalog():
+    print("Available motor diagnostic profiles:")
+    print("  manual: existing variable-duty W/A/S/D behavior")
+    for phase, profiles in PHASE_DRIVE_PROFILES.items():
+        for index in range(len(profiles)):
+            _print_phase_profile(phase, index)
+
+
+def _print_controls():
+    print(
+        "Controls: W/A/S/D or Arrow Keys, 0=manual, 1..7=phase, "
+        "M=next phase profile, +=faster, -=slower, space=stop, ?=help, q=quit"
+    )
+
+
 def drive_forward(speed=DEFAULT_SPEED):
     """Drive both motors forward."""
     _apply_manual_drive_pattern("w", speed)
@@ -342,19 +719,42 @@ def _clamp_speed(speed):
 def parse_args():
     parser = argparse.ArgumentParser(description="Interactive motor diagnostic")
     parser.add_argument("--default-speed", type=float, default=DEFAULT_SPEED)
+    parser.add_argument(
+        "--phase",
+        default="manual",
+        help="startup mode: manual/0 or P1 through P7 (default: manual)",
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="startup phase profile name; use --list-profiles to show names",
+    )
+    parser.add_argument(
+        "--list-profiles",
+        action="store_true",
+        help="print phase/profile names without initializing GPIO",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     current_speed = float(args.default_speed)
+    if bool(getattr(args, "list_profiles", False)):
+        print_profile_catalog()
+        return
+    active_phase = _normalize_phase(getattr(args, "phase", "manual"))
+    profile_index = (
+        0
+        if active_phase == "manual"
+        else _profile_index_for_name(active_phase, getattr(args, "profile", None))
+    )
     try:
         setup()
-        print(
-            "Motor Control Ready "
-            "(W/A/S/D or Arrow Keys, +=faster, -=slower, space=stop, q=quit)"
-        )
+        print("Motor Control Ready")
+        _print_controls()
         print(f"Current Duty: {current_speed:.0f}%")
+        _print_phase_profile(active_phase, profile_index)
         while True:
             cmd = _get_command()
 
@@ -374,20 +774,58 @@ def main():
                 stop()
                 continue
 
+            if cmd == '?':
+                _print_controls()
+                _print_phase_profile(active_phase, profile_index)
+                continue
+
+            if cmd in "01234567":
+                stop()
+                active_phase = "manual" if cmd == "0" else cmd
+                profile_index = 0
+                _print_phase_profile(active_phase, profile_index)
+                continue
+
+            if cmd == 'm':
+                stop()
+                if active_phase == "manual":
+                    print("Manual mode has no fixed profiles. Select P1..P7 first.")
+                else:
+                    profile_index = (
+                        profile_index + 1
+                    ) % len(PHASE_DRIVE_PROFILES[active_phase])
+                    _print_phase_profile(active_phase, profile_index)
+                continue
+
             if cmd in ('+', '='):
-                current_speed = _clamp_speed(current_speed + SPEED_STEP)
-                print(f"Duty Up -> {current_speed:.0f}%")
+                if active_phase == "manual":
+                    current_speed = _clamp_speed(current_speed + SPEED_STEP)
+                    print(f"Duty Up -> {current_speed:.0f}%")
+                else:
+                    print("Phase profiles use fixed production duty. Press 0 for adjustable manual mode.")
                 continue
 
             if cmd in ('-', '_'):
-                current_speed = _clamp_speed(current_speed - SPEED_STEP)
-                print(f"Duty Down -> {current_speed:.0f}%")
+                if active_phase == "manual":
+                    current_speed = _clamp_speed(current_speed - SPEED_STEP)
+                    print(f"Duty Down -> {current_speed:.0f}%")
+                else:
+                    print("Phase profiles use fixed production duty. Press 0 for adjustable manual mode.")
                 continue
 
             # Apply a short buffer before acting to reduce regen stress.
             time.sleep(COMMAND_BUFFER_SEC)
 
-            if cmd == 'w':
+            if cmd in ("w", "a", "s", "d") and active_phase != "manual":
+                pattern = get_phase_drive_pattern(active_phase, profile_index, cmd)
+                print(
+                    f"P{active_phase}/{PHASE_DRIVE_PROFILES[active_phase][profile_index]['name']} "
+                    f"{pattern['label']}: "
+                    f"L={_format_wheel(pattern['speed_left'], pattern['forward_left'])} "
+                    f"R={_format_wheel(pattern['speed_right'], pattern['forward_right'])}"
+                )
+                _apply_phase_drive_pattern(active_phase, profile_index, cmd)
+            elif cmd == 'w':
                 print(f"Forward ({current_speed:.0f}%)")
                 drive_forward(current_speed)
             elif cmd == 's':
@@ -400,7 +838,7 @@ def main():
                 print(f"Right ({current_speed:.0f}%)")
                 turn_right(current_speed)
             else:
-                print(f"Unknown command '{cmd}'. Use W/A/S/D, space, or q.")
+                print(f"Unknown command '{cmd}'. Press ? for help.")
 
     except KeyboardInterrupt:
         print("\nExiting...")

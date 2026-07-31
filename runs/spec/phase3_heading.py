@@ -222,7 +222,24 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertEqual(first_args[0], first_args[2])
         self.assertEqual(second_kwargs["cmd_type"], "stop")
 
-    def test_phase3_large_verified_bno_error_uses_pivot_turn(self):
+    def test_phase3_active_gps_keeps_probing_until_course_is_available(self):
+        ctrl = _HeadingOnlyController()
+        snapshot = {
+            "gps_detect": 1,
+            "gps_heading_valid": False,
+            "angle_valid": False,
+            "angle": 0.0,
+        }
+
+        ctrl._drive_phase3_navigation(snapshot, 90.0, now=10.0)
+        ctrl._drive_phase3_navigation(snapshot, 90.0, now=20.0)
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual(kwargs["cmd_type"], "phase3_gps_probe")
+        self.assertEqual(args[0], 70)
+        self.assertEqual(args[2], 70)
+
+    def test_phase3_large_verified_bno_error_uses_powered_forward_arc(self):
         ctrl = _HeadingOnlyController()
         ctrl.phase3_heading_entry_ready = True
         ctrl.bno_heading_offset_valid = True
@@ -240,11 +257,13 @@ class Phase3HeadingTest(unittest.TestCase):
         args, kwargs = ctrl.motor_commands[-1]
         self.assertEqual(source, "BNO_ALIGNED")
         self.assertAlmostEqual(diff, 170.0)
-        self.assertEqual(kwargs["cmd_type"], "phase3_bno_pivot")
+        self.assertEqual(kwargs["cmd_type"], "phase3_bno_large_arc")
         # Positive compass-heading error requires a right turn: logical left
-        # wheel drives while the logical right wheel is stopped.
-        self.assertEqual(args[0], 34)
-        self.assertEqual(args[2], 0.0)
+        # wheel is faster, but both remain powered to avoid dragging on grass.
+        self.assertEqual(args[0], 85)
+        self.assertEqual(args[2], 45)
+        self.assertTrue(args[1])
+        self.assertTrue(args[3])
 
 
 if __name__ == "__main__":

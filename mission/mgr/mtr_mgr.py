@@ -12,6 +12,7 @@ from mission.const import (
     DEVICE_MOTOR_1_PWM,
     DEVICE_MOTOR_2_DIR,
     DEVICE_MOTOR_2_PWM,
+    GPS_ACTIVE_DETECT,
     MOTOR_IDLE_SLEEP,
     MOTOR_LOOP_INTERVAL,
     MOTOR_RAMP_STEP,
@@ -74,13 +75,14 @@ from mission.const import (
     PHASE3_BNO_TRUST_MAX_JUMP_DEG,
     PHASE3_BNO_TRUST_MAX_OFFSET_DEG,
     PHASE3_BNO_TRUST_MAX_STALE_SEC,
+    PHASE3_LARGE_ERROR_DEG,
+    PHASE3_LARGE_ERROR_INNER_SPEED,
+    PHASE3_LARGE_ERROR_OUTER_SPEED,
     PHASE3_MAG_STUCK_MIN_DELTA_DEG,
     PHASE3_MAG_STUCK_TIMEOUT_SEC,
     PHASE3_MOTOR_LOOP_INTERVAL,
     PHASE3_NO_HEADING_SPEED,
     PHASE3_NO_HEADING_TIMEOUT_SEC,
-    PHASE3_PIVOT_THRESHOLD_DEG,
-    PHASE3_PIVOT_SPEED,
     PHASE3_TURN_RAMP_TIME,
     PHASE3_TURN_INNER_SPEED,
     PHASE3_TURN_OUTER_SPEED,
@@ -370,7 +372,8 @@ class MotorManager:
             if self.phase3_no_heading_start is None:
                 self.phase3_no_heading_start = now
             elapsed = now - self.phase3_no_heading_start
-            if elapsed <= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
+            gps_fix_active = snapshot.get("gps_detect") == GPS_ACTIVE_DETECT
+            if gps_fix_active or elapsed <= float(PHASE3_NO_HEADING_TIMEOUT_SEC):
                 probe_speed = self._clamp_percent(PHASE3_NO_HEADING_SPEED)
                 self.set_motors(
                     probe_speed,
@@ -440,12 +443,15 @@ class MotorManager:
                 ramp_time=PHASE3_FORWARD_RAMP_TIME,
                 cmd_type="phase3_bno_forward",
             )
-        elif abs(diff) >= float(PHASE3_PIVOT_THRESHOLD_DEG):
-            turn_side = "right" if diff > 0 else "left"
-            self._set_forward_pivot_turn(
-                turn_side,
-                speed_outer=float(PHASE3_PIVOT_SPEED),
-                cmd_type="phase3_bno_pivot",
+        elif abs(diff) >= float(PHASE3_LARGE_ERROR_DEG):
+            # A stopped inner wheel dragged badly on grass. Keep both wheels
+            # powered and use a high-torque forward arc for large errors.
+            fast_side = "left" if diff > 0 else "right"
+            self._set_forward_diff_turn(
+                fast_side,
+                speed_fast=float(PHASE3_LARGE_ERROR_OUTER_SPEED),
+                speed_slow=float(PHASE3_LARGE_ERROR_INNER_SPEED),
+                cmd_type="phase3_bno_large_arc",
                 ramp_time=PHASE3_TURN_RAMP_TIME,
             )
         elif diff > 0:

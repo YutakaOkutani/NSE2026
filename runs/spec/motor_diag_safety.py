@@ -17,6 +17,14 @@ spec.loader.exec_module(motor_diag)
 
 
 class MotorDiagnosticSafetyTest(unittest.TestCase):
+    def test_every_phase_exposes_all_wasd_keys(self):
+        self.assertEqual(set(motor_diag.PHASE_DRIVE_PROFILES), set("1234567"))
+        for phase, profiles in motor_diag.PHASE_DRIVE_PROFILES.items():
+            with self.subTest(phase=phase):
+                self.assertGreaterEqual(len(profiles), 1)
+                for profile in profiles:
+                    self.assertEqual(set(profile["commands"]), set("wasd"))
+
     def test_production_motor_direction_matches_current_airframe(self):
         self.assertEqual(motor_diag.motor_forward_to_dir_value(1, True), 0)
         self.assertEqual(motor_diag.motor_forward_to_dir_value(2, True), 1)
@@ -54,6 +62,105 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
         mapped = motor_diag.map_logical_wheels_to_physical(*logical_call)
         self.assertEqual(mapped[0], 60.0)
         self.assertEqual(mapped[2], 100.0)
+
+    def test_phase3_navigation_profile_matches_production_outputs(self):
+        forward = motor_diag.get_phase_drive_pattern("3", 0, "w")
+        left = motor_diag.get_phase_drive_pattern("3", 0, "a")
+        right = motor_diag.get_phase_drive_pattern("3", 0, "d")
+
+        self.assertEqual((forward["speed_left"], forward["speed_right"]), (70.0, 70.0))
+        self.assertEqual((left["speed_left"], left["speed_right"]), (50.0, 75.0))
+        self.assertEqual((right["speed_left"], right["speed_right"]), (75.0, 50.0))
+
+    def test_phase3_large_arc_profile_keeps_both_wheels_powered(self):
+        left = motor_diag.get_phase_drive_pattern("P3", 1, "a")
+        right = motor_diag.get_phase_drive_pattern("P3", 1, "d")
+
+        self.assertEqual((left["speed_left"], left["speed_right"]), (45.0, 85.0))
+        self.assertEqual((right["speed_left"], right["speed_right"]), (85.0, 45.0))
+        self.assertGreater(min(left["speed_left"], left["speed_right"]), 0.0)
+        self.assertGreater(min(right["speed_left"], right["speed_right"]), 0.0)
+
+    def test_phase2_profiles_cover_calibration_offset_and_reorient_outputs(self):
+        profiles = motor_diag.PHASE_DRIVE_PROFILES["2"]
+
+        calibration_left = profiles[1]["commands"]["a"]
+        offset_left = profiles[2]["commands"]["a"]
+        reorient_left = profiles[3]["commands"]["a"]
+
+        self.assertEqual(
+            (calibration_left["speed_left"], calibration_left["speed_right"]),
+            (25.0, 45.0),
+        )
+        self.assertEqual(
+            (offset_left["speed_left"], offset_left["speed_right"]),
+            (70.0, 100.0),
+        )
+        self.assertEqual(
+            (reorient_left["speed_left"], reorient_left["speed_right"]),
+            (25.0, 55.0),
+        )
+
+    def test_phase4_and_phase5_profiles_expose_configured_extreme_turns(self):
+        phase4_align_left = motor_diag.get_phase_drive_pattern("4", 1, "a")
+        phase5_left = motor_diag.get_phase_drive_pattern("5", 0, "a")
+
+        self.assertEqual(
+            (phase4_align_left["speed_left"], phase4_align_left["speed_right"]),
+            (30.0, 70.0),
+        )
+        self.assertEqual(
+            (phase5_left["speed_left"], phase5_left["speed_right"]),
+            (58.0, 100.0),
+        )
+
+    def test_phase7_wasd_always_stops(self):
+        for cmd in "wasd":
+            with self.subTest(cmd=cmd):
+                pattern = motor_diag.get_phase_drive_pattern("7", 0, cmd)
+                self.assertEqual((pattern["speed_left"], pattern["speed_right"]), (0.0, 0.0))
+
+        with patch.object(motor_diag, "stop") as stop:
+            self.assertTrue(motor_diag._apply_phase_drive_pattern("7", 0, "w"))
+        stop.assert_called_once_with()
+
+    def test_phase_profile_application_uses_profile_ramp(self):
+        with patch.object(motor_diag, "set_motors") as set_motors:
+            self.assertTrue(motor_diag._apply_phase_drive_pattern("3", 1, "a"))
+
+        set_motors.assert_called_once_with(
+            45.0,
+            1,
+            85.0,
+            1,
+            ramp_time=0.1,
+            step_interval=0.05,
+        )
+
+    def test_runtime_can_select_phase_and_cycle_profile(self):
+        args = types.SimpleNamespace(
+            default_speed=50.0,
+            phase="manual",
+            profile=None,
+            list_profiles=False,
+        )
+        commands = iter(("3", "m", "a", "q"))
+        with patch.object(motor_diag, "parse_args", return_value=args):
+            with patch.object(motor_diag, "setup"):
+                with patch.object(motor_diag, "_get_command", side_effect=lambda: next(commands)):
+                    with patch.object(motor_diag.time, "sleep"):
+                        with patch.object(motor_diag, "set_motors") as set_motors:
+                            with patch.object(motor_diag, "stop"):
+                                motor_diag.main()
+
+        set_motors.assert_called_once_with(
+            45.0,
+            1,
+            85.0,
+            1,
+            ramp_time=0.1,
+            step_interval=0.05,
+        )
 
     def test_quit_always_stops_motors(self):
         args = types.SimpleNamespace(default_speed=50.0)
