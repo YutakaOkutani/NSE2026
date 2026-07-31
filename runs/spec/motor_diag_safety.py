@@ -90,7 +90,7 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
 
         self.assertEqual(
             (calibration_left["speed_left"], calibration_left["speed_right"]),
-            (25.0, 45.0),
+            (45.0, 70.0),
         )
         self.assertEqual(
             (offset_left["speed_left"], offset_left["speed_right"]),
@@ -98,7 +98,15 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
         )
         self.assertEqual(
             (reorient_left["speed_left"], reorient_left["speed_right"]),
-            (25.0, 55.0),
+            (45.0, 70.0),
+        )
+        self.assertGreaterEqual(
+            min(calibration_left["speed_left"], calibration_left["speed_right"]),
+            45.0,
+        )
+        self.assertGreaterEqual(
+            min(reorient_left["speed_left"], reorient_left["speed_right"]),
+            45.0,
         )
 
     def test_phase4_and_phase5_profiles_expose_configured_extreme_turns(self):

@@ -76,6 +76,7 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertTrue(second[3])
         self.assertEqual(first[0], second[2])
         self.assertEqual(first[2], second[0])
+        self.assertGreaterEqual(min(first[0], first[2]), 45.0)
 
     def test_phase2_reorient_uses_forward_only_arc(self):
         ctrl = _HeadingOnlyController()
@@ -87,7 +88,59 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertTrue(args[1])
         self.assertTrue(args[3])
         self.assertNotEqual(args[0], args[2])
+        self.assertGreaterEqual(min(args[0], args[2]), 45.0)
         self.assertIn("forward_reorient", kwargs["cmd_type"])
+
+    def test_phase4_search_calls_configured_forward_arc(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            {
+                "cone_probability": 0.0,
+                "cone_is_reached": False,
+                "cone_direction": 0.5,
+            }
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (28, 45))
+        self.assertTrue(args[1])
+        self.assertTrue(args[3])
+        self.assertEqual(kwargs["cmd_type"], "phase4_search_arc")
+
+    def test_phase4_alignment_calls_configured_forward_arc(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            {
+                "cone_probability": 0.5,
+                "cone_is_reached": False,
+                "cone_direction": 0.0,
+            }
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (30, 70))
+        self.assertTrue(args[1])
+        self.assertTrue(args[3])
+        self.assertEqual(kwargs["cmd_type"], "phase4_camera_align_arc")
+
+    def test_phase5_approach_calls_configured_maximum_steering_arc(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase5_camera(
+            {
+                "cone_probability": 0.5,
+                "cone_is_reached": False,
+                "cone_direction": 0.0,
+            }
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (58.0, 100.0))
+        self.assertTrue(args[1])
+        self.assertTrue(args[3])
+        self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_left")
 
     def test_phase2_offset_hold_steers_back_to_relative_bno_heading(self):
         ctrl = _HeadingOnlyController()

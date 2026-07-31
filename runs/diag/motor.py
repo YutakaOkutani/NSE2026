@@ -208,7 +208,7 @@ PHASE_DRIVE_PROFILES = {
         ),
         _profile(
             "calibration_arc",
-            "P2 magnetic-calibration arc; A/D reproduce the two alternating arc directions.",
+            "P2 grass-torque magnetic-calibration arc; A/D reproduce the two production directions.",
             _wasd_commands(
                 PHASE2_CALIB_ARC_OUTER_SPEED,
                 PHASE2_CALIB_ARC_OUTER_SPEED,
@@ -228,7 +228,7 @@ PHASE_DRIVE_PROFILES = {
         ),
         _profile(
             "reorient",
-            "P2 retry reorientation forward arc.",
+            "P2 grass-torque retry reorientation forward arc.",
             _wasd_commands(
                 PHASE2_FORWARD_REORIENT_OUTER_SPEED,
                 PHASE2_FORWARD_REORIENT_OUTER_SPEED,
@@ -275,7 +275,7 @@ PHASE_DRIVE_PROFILES = {
     "4": (
         _profile(
             "search_arc",
-            "P4 configured camera-search arc; production normally uses the left direction.",
+            "P4 production camera-search arc; A reproduces phase4_search_arc.",
             _wasd_commands(
                 SEARCH_ROTATION_SPEED,
                 SEARCH_ROTATION_SPEED,
@@ -285,7 +285,7 @@ PHASE_DRIVE_PROFILES = {
         ),
         _profile(
             "camera_align",
-            "P4 configured camera-centering forward and alignment arc outputs.",
+            "P4 production camera-centering forward and phase4_camera_align_arc outputs.",
             _wasd_commands(
                 PHASE4_ALIGN_FORWARD_SPEED,
                 PHASE4_ALIGN_PIVOT_SPEED,
@@ -297,7 +297,7 @@ PHASE_DRIVE_PROFILES = {
     "5": (
         _profile(
             "approach",
-            "P5 cone-approach straight and maximum steering outputs.",
+            "P5 production cone-approach forward and maximum steering outputs.",
             _wasd_commands(
                 PHASE5_BASE_SPEED,
                 _phase5_outer,
@@ -309,7 +309,7 @@ PHASE_DRIVE_PROFILES = {
     "6": (
         _profile(
             "final_ram",
-            "P6 final straight ram; A/D are diagnostic turns.",
+            "P6 production final straight ram; A/D are diagnostic turns.",
             _straight_only_commands(PHASE6_RAM_SPEED, DEFAULT_RAMP_TIME),
         ),
     ),

@@ -505,6 +505,115 @@ class MotorManager:
         self.phase45_last_seen_time = time.time()
         return filtered
 
+    @staticmethod
+    def _phase45_cone_seen(snapshot, threshold):
+        try:
+            cone_probability = float(snapshot.get("cone_probability", 0.0))
+        except (TypeError, ValueError):
+            cone_probability = 0.0
+        return bool(snapshot.get("cone_is_reached", False)) or cone_probability > float(threshold)
+
+    def _drive_phase4_camera(self, snapshot):
+        """Apply one production Phase4 search/alignment motor decision."""
+        cone_seen = self._phase45_cone_seen(
+            snapshot,
+            CONE_PROBABILITY_THRESHOLD_PHASE4,
+        )
+        cone_direction = snapshot.get("cone_direction", CONE_CENTER_POSITION)
+        if not cone_seen:
+            self._update_phase45_filtered_cone_dir(cone_direction, False)
+            self._set_forward_pivot_turn(
+                "left",
+                SEARCH_ROTATION_SPEED,
+                cmd_type="phase4_search_arc",
+                speed_inner=SEARCH_ROTATION_INNER_SPEED,
+                ramp_time=PHASE4_MOTOR_RAMP_TIME,
+            )
+            return
+
+        filtered_direction = self._update_phase45_filtered_cone_dir(
+            cone_direction,
+            True,
+        )
+        if filtered_direction is None:
+            filtered_direction = CONE_CENTER_POSITION
+        error = filtered_direction - CONE_CENTER_POSITION
+        if abs(error) <= float(PHASE4_ALIGN_STOP_DEADBAND):
+            self.set_motors(
+                PHASE4_ALIGN_FORWARD_SPEED,
+                True,
+                PHASE4_ALIGN_FORWARD_SPEED,
+                True,
+                ramp_time=PHASE4_MOTOR_RAMP_TIME,
+                cmd_type="phase4_camera_center_forward",
+            )
+            return
+
+        turn_side = "right" if error > 0.0 else "left"
+        self._set_forward_pivot_turn(
+            turn_side,
+            PHASE4_ALIGN_PIVOT_SPEED,
+            cmd_type="phase4_camera_align_arc",
+            speed_inner=PHASE4_ALIGN_INNER_SPEED,
+            ramp_time=PHASE4_MOTOR_RAMP_TIME,
+        )
+
+    def _drive_phase5_camera(self, snapshot):
+        """Apply one production Phase5 visual-approach motor decision."""
+        cone_seen = self._phase45_cone_seen(
+            snapshot,
+            CONE_PROBABILITY_THRESHOLD_PHASE5,
+        )
+        cone_direction = snapshot.get("cone_direction", CONE_CENTER_POSITION)
+        filtered_direction = self._update_phase45_filtered_cone_dir(
+            cone_direction,
+            cone_seen,
+        )
+        steer_direction = (
+            filtered_direction
+            if filtered_direction is not None
+            else CONE_CENTER_POSITION
+        )
+        error = steer_direction - CONE_CENTER_POSITION
+        if abs(error) <= float(PHASE5_STEER_DEADBAND):
+            self.set_motors(
+                PHASE5_BASE_SPEED,
+                True,
+                PHASE5_BASE_SPEED,
+                True,
+                ramp_time=PHASE5_MOTOR_RAMP_TIME,
+                cmd_type="phase5_approach_forward",
+            )
+            return
+
+        turn_delta = min(
+            float(PHASE5_TURN_CLAMP),
+            abs(error) * float(APPROACH_TURN_GAIN),
+        )
+        inner_speed = self._clamp_percent(
+            max(
+                float(PHASE5_BASE_SPEED) - turn_delta,
+                float(PHASE5_BASE_SPEED) * 0.55,
+            )
+        )
+        outer_speed = self._clamp_percent(
+            float(PHASE5_BASE_SPEED) + turn_delta
+        )
+        if error > 0.0:
+            speed_left, speed_right = outer_speed, inner_speed
+            cmd_type = "phase5_approach_steer_right"
+        else:
+            speed_left, speed_right = inner_speed, outer_speed
+            cmd_type = "phase5_approach_steer_left"
+        self.set_motors(
+            speed_left,
+            True,
+            speed_right,
+            True,
+            ramp_time=PHASE5_MOTOR_RAMP_TIME,
+            cmd_type=cmd_type,
+        )
+
     def _record_motor_command(self, cmd_type, motor1_speed, motor1_forward, motor2_speed, motor2_forward):
         self.last_motor_command = {
             "type": cmd_type,
@@ -512,7 +621,7 @@ class MotorManager:
             "motor1_speed": float(motor1_speed),
             "motor1_forward": int(bool(motor1_forward)),
             "motor2_speed": float(motor2_speed),
-        "motor2_forward": int(bool(motor2_forward)),
+            "motor2_forward": int(bool(motor2_forward)),
         }
 
     def move_motor_thread(self):
@@ -633,9 +742,10 @@ class MotorManager:
                         continue
                     self._drive_phase3_navigation(snapshot, direction)
 
-                if phase in (Phase.PHASE4, Phase.PHASE5):
-                    if not self._phase45_camera_track_step(snapshot):
-                        self.stop_motors()
+                if phase == Phase.PHASE4:
+                    self._drive_phase4_camera(snapshot)
+                elif phase == Phase.PHASE5:
+                    self._drive_phase5_camera(snapshot)
 
                 if phase in (Phase.PHASE4, Phase.PHASE5):
                     time.sleep(PHASE45_MOTOR_LOOP_INTERVAL)
