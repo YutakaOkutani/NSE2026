@@ -14,6 +14,8 @@ from mission.const import (
     PHASE2_CALIB_STABLE_SEC,
     PHASE2_OFFSET_CONTROL_SETTLE_TIME,
     PHASE2_OFFSET_LEG_MAX_TIME,
+    PHASE2_OFFSET_MAX_DISTANCE_M,
+    PHASE2_OFFSET_MAX_SUBSEGMENT_DIFF_DEG,
     PHASE2_OFFSET_NEAR_GOAL_GRACE_SEC,
     PHASE2_OFFSET_MODE_COLLECT,
     PHASE2_OFFSET_MODE_READINESS,
@@ -263,6 +265,42 @@ class Phase2FlowTest(unittest.TestCase):
         Phase2Handler._begin_offset_retry(ctrl, 10.0, "bno_heading_unstable")
         self.assertEqual(ctrl.phase2_offset_mode, PHASE2_OFFSET_MODE_TURNAROUND)
         self.assertIsNone(ctrl.phase2_offset_turn_target_deg)
+
+    def test_rejected_segment_at_max_distance_falls_back_to_phase3_gps_only(self):
+        ctrl = _Controller()
+        ctrl.phase2_stage = PHASE2_STAGE_OFFSET
+        ctrl.phase2_offset_reference_bno_deg = 270.0
+        headings = (251.0, 251.0, 251.0, 289.0, 289.0, 289.0)
+
+        with patch("mission.phases.p2.time.time", return_value=10.0):
+            for index, heading in enumerate(headings):
+                Phase2Handler._update_offset_segment(
+                    ctrl,
+                    {
+                        "gps_fix_seq": index + 1,
+                        "lat": 35.0 + index * 0.000012,
+                        "lng": 139.0,
+                        "angle_valid": True,
+                        "angle": heading,
+                    },
+                )
+
+        self.assertGreaterEqual(
+            ctrl.phase2_offset_distance_m,
+            PHASE2_OFFSET_MAX_DISTANCE_M,
+        )
+        self.assertGreater(
+            ctrl.phase2_offset_subsegment_diff_deg,
+            PHASE2_OFFSET_MAX_SUBSEGMENT_DIFF_DEG,
+        )
+        self.assertEqual(ctrl.st.values["phase"], int(Phase.PHASE3))
+        self.assertFalse(ctrl.bno_heading_offset_valid)
+        self.assertFalse(ctrl.bno_heading_offset_verified)
+        self.assertTrue(ctrl.phase3_heading_entry_ready)
+        self.assertEqual(
+            ctrl.phase2_offset_reject_reason,
+            "gps_only:offset_inconsistent",
+        )
 
     def test_repeated_offset_timeout_falls_back_to_phase3(self):
         ctrl = _Controller()
