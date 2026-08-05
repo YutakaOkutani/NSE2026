@@ -10,6 +10,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mission.const import (
+    GRASS_MIN_MOTOR_SPEED,
     MANUAL_TURN_SPEED_RATIO,
     MOTOR_SPEED_OFFSET_1,
     MOTOR_SPEED_OFFSET_2,
@@ -147,12 +148,25 @@ def _wasd_commands(
     }
 
 
-def _straight_only_commands(speed, ramp_time, step_interval=DEFAULT_STEP_INTERVAL):
+def _straight_only_commands(
+    speed,
+    ramp_time,
+    step_interval=DEFAULT_STEP_INTERVAL,
+    minimum_turn_speed=0.0,
+):
     """Expose straight-only phases through WASD without hiding that A/D are diagnostic."""
-    turn_inner = float(speed) * float(MANUAL_TURN_SPEED_RATIO)
+    turn_inner = max(
+        float(speed) * float(MANUAL_TURN_SPEED_RATIO),
+        float(minimum_turn_speed),
+    )
+    # Preserve the configured turn ratio when applying a grass-safe inner-wheel floor.
+    turn_outer = max(
+        float(speed),
+        turn_inner / float(MANUAL_TURN_SPEED_RATIO),
+    )
     commands = _wasd_commands(
         speed,
-        speed,
+        turn_outer,
         turn_inner,
         ramp_time,
         ramp_time,
@@ -310,7 +324,11 @@ PHASE_DRIVE_PROFILES = {
         _profile(
             "final_ram",
             "P6 production final straight ram; A/D are diagnostic turns.",
-            _straight_only_commands(PHASE6_RAM_SPEED, DEFAULT_RAMP_TIME),
+            _straight_only_commands(
+                PHASE6_RAM_SPEED,
+                DEFAULT_RAMP_TIME,
+                minimum_turn_speed=GRASS_MIN_MOTOR_SPEED,
+            ),
         ),
     ),
     "7": (

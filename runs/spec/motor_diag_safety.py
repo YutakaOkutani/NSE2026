@@ -110,17 +110,40 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
         )
 
     def test_phase4_and_phase5_profiles_expose_configured_extreme_turns(self):
+        phase4_search_left = motor_diag.get_phase_drive_pattern("4", 0, "a")
         phase4_align_left = motor_diag.get_phase_drive_pattern("4", 1, "a")
         phase5_left = motor_diag.get_phase_drive_pattern("5", 0, "a")
 
         self.assertEqual(
+            (phase4_search_left["speed_left"], phase4_search_left["speed_right"]),
+            (45.0, 70.0),
+        )
+        self.assertEqual(
             (phase4_align_left["speed_left"], phase4_align_left["speed_right"]),
-            (30.0, 70.0),
+            (45.0, 70.0),
+        )
+        self.assertGreaterEqual(
+            min(phase4_align_left["speed_left"], phase4_align_left["speed_right"]),
+            45.0,
         )
         self.assertEqual(
             (phase5_left["speed_left"], phase5_left["speed_right"]),
             (58.0, 100.0),
         )
+
+    def test_phase6_profile_uses_grass_safe_minimum_speed(self):
+        expected_speeds = {
+            "w": (45.0, 45.0),
+            "a": (45.0, 75.0),
+            "s": (45.0, 45.0),
+            "d": (75.0, 45.0),
+        }
+        for cmd, expected in expected_speeds.items():
+            with self.subTest(cmd=cmd):
+                pattern = motor_diag.get_phase_drive_pattern("6", 0, cmd)
+                actual = (pattern["speed_left"], pattern["speed_right"])
+                self.assertEqual(actual, expected)
+                self.assertGreaterEqual(min(actual), 45.0)
 
     def test_phase7_wasd_always_stops(self):
         for cmd in "wasd":
