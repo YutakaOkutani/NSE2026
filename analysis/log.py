@@ -25,6 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from lib.cone_diagnostics import CONE_DIAGNOSTIC_LOG_COLUMNS
+
 try:
     from mission.const import LOG_HEADER
 except Exception:
@@ -129,7 +131,30 @@ COLUMN_GROUPS = [
     {
         "key": "vision_detection",
         "title": "Vision / Detection",
-        "cols": ["ConeDir", "ConeProb", "ConeMethod", "ObstacleDist", "SonarValid", "SonarStaleSec"],
+        "cols": [
+            *CONE_DIAGNOSTIC_LOG_COLUMNS,
+            "ConeStaleSec",
+            "ConeUpdatedElapsedSec",
+            "ConePhaseDecision",
+            "ConePhaseThreshold",
+            "ConePhaseReachedProbabilityThreshold",
+            "ConePhaseCenterTolerance",
+            "ConePhaseDirectionTolerance",
+            "ConePhaseRequiredConfirmFrames",
+            "ConePhaseDetected",
+            "ConePhaseReachedEffective",
+            "ConePhaseCentered",
+            "ConePhaseDirectionConsistent",
+            "ConePhaseConfirmCount",
+            "Phase4ConeConfirmCount",
+            "Phase4ConeConfirmMarker",
+            "Phase5ConeLostCount",
+            "Phase5ReachConfirmCount",
+            "Phase5EntryReason",
+            "ObstacleDist",
+            "SonarValid",
+            "SonarStaleSec",
+        ],
     },
     {
         "key": "fall_and_sensor_health",
@@ -398,6 +423,110 @@ def write_group_csvs(df: pd.DataFrame, out_dir: Path) -> None:
         df[export_cols].to_csv(out_dir / f"{group['key']}.csv", index=False)
 
 
+def write_vision_diagnostics(df: pd.DataFrame, out_dir: Path) -> None:
+    """Export explainable vision gate failures while accepting legacy log schemas."""
+    required_any = {
+        "ConeIsReached",
+        "ConeCloseReachedOK",
+        "ConeIsDetected",
+        "ConeProbabilityDetected",
+        "ConeValid",
+        "ConePenaltyFlags",
+    }
+    if not required_any.intersection(df.columns):
+        return
+
+    numeric_cache = {}
+
+    def num(column, default=0.0):
+        if column not in df.columns:
+            return pd.Series(default, index=df.index, dtype=float)
+        if column not in numeric_cache:
+            numeric_cache[column] = pd.to_numeric(df[column], errors="coerce").fillna(default)
+        return numeric_cache[column]
+
+    phase = num("Phase", -1)
+    prob = num("ConeProb")
+    masks = [
+        (
+            "reached_rejected_by_phase_gate",
+            (num("ConeIsReached") > 0) & (num("ConePhaseReachedEffective") <= 0) & phase.isin([4, 5]),
+        ),
+        (
+            "close_reached_probability_demoted",
+            (num("ConeCloseReachedOK") > 0) & (prob < 0.28),
+        ),
+        (
+            "detector_flag_probability_mismatch",
+            num("ConeIsDetected").round() != num("ConeProbabilityDetected").round(),
+        ),
+        (
+            "invalid_camera_observation",
+            (num("ConeValid") <= 0) & phase.isin([4, 5]),
+        ),
+        (
+            "roi_histogram_unavailable",
+            (num("ConeValid") > 0) & (num("ConeROIHistAvailable") <= 0) & phase.isin([4, 5]),
+        ),
+    ]
+
+    context_cols = [
+        col
+        for col in [
+            "ElapsedSec",
+            "Phase",
+            "ConeSeq",
+            "ConeValid",
+            "ConeStatus",
+            "ConeProb",
+            "ConeRawProb",
+            "ConeCandidateProb",
+            "ConePreFilterProb",
+            "ConeIsDetected",
+            "ConeProbabilityDetected",
+            "ConeIsReached",
+            "ConeRawReached",
+            "ConeCloseReachedOK",
+            "ConeROISupport",
+            "ConeStrictRedOK",
+            "ConeStrictRedRejectReason",
+            "ConeCloseReachedRejectReason",
+            "ConePenaltyFlags",
+            "ConePhaseDecision",
+            "ConePhaseReachedEffective",
+            "ConePhaseConfirmCount",
+        ]
+        if col in df.columns
+    ]
+    event_frames = []
+    summary_rows = []
+    for event_type, mask in masks:
+        mask = mask.fillna(False)
+        count = int(mask.sum())
+        summary_rows.append({"event_type": event_type, "rows": count})
+        if count:
+            events = df.loc[mask, context_cols].copy()
+            events.insert(0, "event_type", event_type)
+            event_frames.append(events)
+
+    if event_frames:
+        pd.concat(event_frames, ignore_index=True).to_csv(
+            out_dir / "vision_gate_events.csv", index=False
+        )
+    pd.DataFrame(summary_rows).to_csv(out_dir / "vision_gate_summary.csv", index=False)
+
+    if "ConePenaltyFlags" in df.columns:
+        penalties = []
+        for value in df["ConePenaltyFlags"].dropna().astype(str):
+            for flag in value.split("|"):
+                flag = flag.strip()
+                if flag:
+                    penalties.append(flag)
+        if penalties:
+            counts = pd.Series(penalties).value_counts().rename_axis("penalty_flag").reset_index(name="rows")
+            counts.to_csv(out_dir / "vision_penalty_summary.csv", index=False)
+
+
 def write_coverage_reports(df: pd.DataFrame, out_dir: Path) -> dict:
     grouped_cols = [c for g in COLUMN_GROUPS for c in g["cols"]]
     grouped_set = set(grouped_cols)
@@ -660,6 +789,7 @@ def analyze_cansat_log(file_path: str | Path | None = None) -> Path:
     coverage = write_coverage_reports(df, out_dir)
     df = detect_anomalies(df, out_dir)
     write_group_csvs(df, out_dir)
+    write_vision_diagnostics(df, out_dir)
     write_basic_summaries(df, out_dir)
     plot_integrated_timeseries(df, out_dir)
     plot_trajectory(df, out_dir)

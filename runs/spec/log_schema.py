@@ -67,6 +67,67 @@ class LogSchemaTest(unittest.TestCase):
         row = ctrl._build_log_row()
 
         self.assertEqual(len(row), len(LOG_HEADER))
+        self.assertEqual(len(LOG_HEADER), len(set(LOG_HEADER)))
+
+    def test_cone_diagnostics_are_written_with_freshness_and_gate_context(self):
+        ctrl = _LogOnlyController()
+        ctrl.cone_phase_decision = "p4_direction_reset"
+        ctrl.cone_phase_threshold = 0.20
+        ctrl.cone_phase_reached_probability_threshold = 0.28
+        ctrl.cone_phase_center_tolerance = 0.42
+        ctrl.cone_phase_direction_tolerance = 0.14
+        ctrl.cone_phase_required_confirm_frames = 2
+        ctrl.cone_phase_detected = True
+        ctrl.cone_phase_reached_effective = False
+        ctrl.cone_phase_centered = True
+        ctrl.cone_phase_direction_consistent = False
+        ctrl.cone_phase_confirm_count = 1
+        ctrl.phase4_detect_confirm_count = 1
+        ctrl.phase4_detect_confirm_marker = 0.73
+        ctrl.count_cone_lost = 0
+        ctrl.phase5_reach_confirm_count = 0
+        ctrl.phase5_entry_reason = "phase4_detected"
+        ctrl.st.update_cone(
+            cone_direction=0.73,
+            cone_probability=0.08,
+            cone_is_reached=True,
+            cone_method="as_is:close_red_region",
+            cone_valid=True,
+            cone_status="ok",
+            cone_debug={
+                "is_detected": 1,
+                "raw_reached": 1,
+                "close_reached_ok": 1,
+                "raw_probability": 0.08,
+                "candidate_probability": 0.62,
+                "pre_filter_probability": 1.0,
+                "roi_hist_available": 0,
+                "strict_red_ok": 0,
+                "penalty_flags": "strict_red_x0.08",
+            },
+            observation_time=101.5,
+            observation_accepted=True,
+        )
+
+        with patch.object(sns_mgr_under_test.time, "time", return_value=102.0):
+            row = ctrl._build_log_row()
+        by_name = dict(zip(LOG_HEADER, row))
+
+        self.assertEqual(by_name["ConeDiagSchemaVersion"], 2)
+        self.assertEqual(by_name["ConeValid"], 1)
+        self.assertEqual(by_name["ConeSeq"], 1)
+        self.assertEqual(by_name["ConeIsReached"], 1)
+        self.assertEqual(by_name["ConeCloseReachedOK"], 1)
+        self.assertEqual(by_name["ConePreFilterProb"], "1.000000")
+        self.assertEqual(by_name["ConeProb"], "0.080000")
+        self.assertEqual(by_name["ConePenaltyFlags"], "strict_red_x0.08")
+        self.assertEqual(by_name["ConeStaleSec"], "0.50")
+        self.assertEqual(by_name["ConeUpdatedElapsedSec"], "1.50")
+        self.assertEqual(by_name["ConePhaseDecision"], "p4_direction_reset")
+        self.assertEqual(by_name["ConePhaseReachedProbabilityThreshold"], "0.280")
+        self.assertEqual(by_name["ConePhaseDirectionTolerance"], "0.140")
+        self.assertEqual(by_name["ConePhaseRequiredConfirmFrames"], 2)
+        self.assertEqual(by_name["ConePhaseConfirmCount"], 1)
 
     def test_radio_columns_are_written_to_log_row(self):
         ctrl = _LogOnlyController()

@@ -13,14 +13,80 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from mission.const import (
+    CONE_PHASE4_CENTER_TOLERANCE,
+    CONE_PHASE4_CONFIRM_FRAMES,
+    CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE,
+    CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD,
+    CONE_PHASE5_REACH_CONFIRM_FRAMES,
+    CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD_PHASE4,
     CONE_PROBABILITY_THRESHOLD_PHASE5,
 )
 from mission.mgr.hw_mgr import HardwareManager
 from lib import cone_detect as dc
+from lib.cone_diagnostics import (
+    CONE_DIAGNOSTIC_KEYS,
+    detector_diagnostics,
+    normalize_cone_diagnostics,
+)
 
 DEFAULT_OUT_BASE = Path("/home/pi/logs_nse2026")
 WINDOW_NAME = "Detector Debug (Production cone_detect.py)"
+
+DEBUG_CSV_BASE_FIELDS = [
+    "frame",
+    "time_sec",
+    "probability",
+    "is_detected_by_phase_threshold",
+    "is_reached",
+    "occupancy",
+    "frame_red_occupancy",
+    "cone_direction",
+    "method",
+    "shape_score",
+    "cone_shape_score",
+    "sv_score",
+    "hue_redness_score",
+    "roi_support_ratio",
+]
+DEBUG_CSV_DIAGNOSTIC_FIELDS = [
+    "schema_version",
+    "valid",
+    "status",
+    "sequence",
+    "phase",
+    "phase_threshold",
+    "phase_reached_probability_threshold",
+    "phase_center_tolerance",
+    "phase_direction_tolerance",
+    "phase_required_confirm_frames",
+    "is_reached_effective_by_phase",
+    "is_phase_candidate",
+    "is_detected_internal",
+] + [
+    key
+    for key in CONE_DIAGNOSTIC_KEYS
+    if key
+    not in {
+        "schema_version",
+        "valid",
+        "status",
+        "sequence",
+        "direction",
+        "probability",
+        "method",
+        "is_detected",
+        "is_reached",
+        "occupancy",
+        "frame_red_occupancy",
+        "shape_score",
+        "cone_shape_score",
+        "sv_score",
+        "hue_redness_score",
+        "roi_support_ratio",
+    }
+]
+DEBUG_CSV_FIELDS = DEBUG_CSV_BASE_FIELDS + DEBUG_CSV_DIAGNOSTIC_FIELDS
 
 
 class _RoiLoader(HardwareManager):
@@ -57,7 +123,7 @@ def build_parser():
         "--outdir",
         type=str,
         default="",
-        help="Output directory. Default: /home/pi/logs_nse2026/camera_debug_<timestamp>.",
+        help="Output directory. Default: /home/pi/logs_nse2026/camera_debug/<timestamp>.",
     )
     return parser
 
@@ -65,17 +131,78 @@ def build_parser():
 def _make_run_outdir(base_dir: Path) -> Path:
     ts = time.strftime("%Y%m%d_%H%M%S")
     subsec = int((time.time() % 1.0) * 1000)
-    outdir = base_dir / f"camera_debug_{ts}_{subsec:03d}"
+    camera_debug_dir = base_dir / "camera_debug"
+    outdir = camera_debug_dir / f"{ts}_{subsec:03d}"
     suffix = 0
     while outdir.exists():
         suffix += 1
-        outdir = base_dir / f"camera_debug_{ts}_{subsec:03d}_{suffix:02d}"
+        outdir = camera_debug_dir / f"{ts}_{subsec:03d}_{suffix:02d}"
     outdir.mkdir(parents=True, exist_ok=False)
     return outdir
 
 
 def _display_available() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _debug_csv_record(detector, frame_idx, elapsed_sec, phase, phase_threshold, *, valid, status):
+    if detector is None:
+        diag = normalize_cone_diagnostics(
+            {"valid": int(bool(valid)), "status": status, "sequence": frame_idx}
+        )
+    else:
+        diag = detector_diagnostics(
+            detector,
+            valid=valid,
+            status=status,
+            sequence=frame_idx,
+        )
+    record = {
+        "frame": frame_idx,
+        "time_sec": elapsed_sec,
+        "probability": diag["probability"],
+        "is_detected_by_phase_threshold": int(diag["probability"] > phase_threshold),
+        "is_reached": diag["is_reached"],
+        "occupancy": diag["occupancy"],
+        "frame_red_occupancy": diag["frame_red_occupancy"],
+        "cone_direction": diag["direction"],
+        "method": diag["method"],
+        "shape_score": diag["shape_score"],
+        "cone_shape_score": diag["cone_shape_score"],
+        "sv_score": diag["sv_score"],
+        "hue_redness_score": diag["hue_redness_score"],
+        "roi_support_ratio": diag["roi_support_ratio"],
+        "phase": phase,
+        "phase_threshold": phase_threshold,
+        "phase_reached_probability_threshold": max(
+            phase_threshold,
+            (
+                CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD
+                if phase == 4
+                else CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD
+            ),
+        ),
+        "phase_center_tolerance": CONE_PHASE4_CENTER_TOLERANCE if phase == 4 else 0.0,
+        "phase_direction_tolerance": (
+            CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE if phase == 4 else 0.0
+        ),
+        "phase_required_confirm_frames": (
+            CONE_PHASE4_CONFIRM_FRAMES if phase == 4 else CONE_PHASE5_REACH_CONFIRM_FRAMES
+        ),
+        "is_detected_internal": diag["is_detected"],
+    }
+    reached_threshold = record["phase_reached_probability_threshold"]
+    record["is_reached_effective_by_phase"] = int(
+        bool(diag["is_reached"]) and diag["probability"] > reached_threshold
+    )
+    centered = abs(diag["direction"] - 0.5) <= float(CONE_PHASE4_CENTER_TOLERANCE)
+    record["is_phase_candidate"] = int(
+        diag["probability"] > phase_threshold and (phase != 4 or centered)
+    )
+    for key in DEBUG_CSV_DIAGNOSTIC_FIELDS:
+        if key not in record:
+            record[key] = diag.get(key, "")
+    return record
 
 
 def _overlay(detector, prob_thresh, frame_idx):
@@ -98,7 +225,7 @@ def _overlay(detector, prob_thresh, frame_idx):
     prob = float(getattr(detector, "probability", 0.0))
     is_reached = bool(getattr(detector, "is_reached", False))
     method = str(getattr(detector, "debug_method", "unknown"))
-    detected = prob >= prob_thresh
+    detected = prob > prob_thresh
     status = f"DET={int(detected)} REACH={int(is_reached)} p={prob:.3f} thr={prob_thresh:.2f} f={frame_idx}"
     cv2.putText(vis, status, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.57, (0, 255, 0) if detected else (0, 0, 255), 2)
     cv2.putText(vis, method, (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 0), 1)
@@ -147,25 +274,8 @@ def main():
     t_start = time.time()
 
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            [
-                "frame",
-                "time_sec",
-                "probability",
-                "is_detected_by_phase_threshold",
-                "is_reached",
-                "occupancy",
-                "frame_red_occupancy",
-                "cone_direction",
-                "method",
-                "shape_score",
-                "cone_shape_score",
-                "sv_score",
-                "hue_redness_score",
-                "roi_support_ratio",
-            ]
-        )
+        writer = csv.DictWriter(f, fieldnames=DEBUG_CSV_FIELDS)
+        writer.writeheader()
 
         while True:
             frame_idx += 1
@@ -173,6 +283,18 @@ def main():
             now = time.time()
             if not ok:
                 print("camera capture failed")
+                writer.writerow(
+                    _debug_csv_record(
+                        None,
+                        frame_idx,
+                        now - t_start,
+                        args.phase,
+                        prob_thresh,
+                        valid=False,
+                        status="camera_capture_failed",
+                    )
+                )
+                f.flush()
                 time.sleep(max(0.0, args.sleep))
                 if args.frames > 0 and frame_idx >= args.frames:
                     break
@@ -180,28 +302,20 @@ def main():
 
             prob = float(detector.probability)
             is_reached = bool(detector.is_reached)
-            is_det = prob >= prob_thresh
+            is_det = prob > prob_thresh
             detect_count += 1 if is_det else 0
             reached_count += 1 if is_reached else 0
 
-            scores = getattr(detector, "debug_scores", {}) or {}
             writer.writerow(
-                [
+                _debug_csv_record(
+                    detector,
                     frame_idx,
                     now - t_start,
-                    prob,
-                    int(is_det),
-                    int(is_reached),
-                    float(getattr(detector, "occupancy", 0.0)),
-                    float(getattr(detector, "frame_red_occupancy", 0.0)),
-                    float(getattr(detector, "cone_direction", 0.5)),
-                    str(getattr(detector, "debug_method", "")),
-                    float(scores.get("shape", 0.0)),
-                    float(scores.get("cone_shape", 0.0)),
-                    float(scores.get("sv", 0.0)),
-                    float(scores.get("hue", 0.0)),
-                    float(scores.get("roi_support", 0.0)),
-                ]
+                    args.phase,
+                    prob_thresh,
+                    valid=True,
+                    status="ok",
+                )
             )
             f.flush()
 

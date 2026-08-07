@@ -122,6 +122,7 @@ def parse_log_start_time(log_path: Path) -> datetime | None:
 def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     has_sonar_valid = "SonarValid" in result.columns
+    has_cone_diagnostics = "ConeDiagSchemaVersion" in result.columns
     numeric_cols = [
         "ElapsedSec",
         "Phase",
@@ -143,12 +144,44 @@ def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "Azimuth",
         "ConeDir",
         "ConeProb",
+        "ConeValid",
+        "ConeSeq",
+        "ConeStaleSec",
+        "ConeIsDetected",
+        "ConeProbabilityDetected",
+        "ConeIsReached",
+        "ConeRawReached",
+        "ConeCloseReachedOK",
+        "ConeRawProb",
+        "ConeCandidateProb",
+        "ConePreFilterProb",
+        "ConeOccupancy",
+        "ConeFrameRedOccupancy",
+        "ConeROISupport",
+        "ConeROIHistAvailable",
+        "ConeStrictRedOK",
+        "ConePhaseReachedEffective",
+        "ConePhaseConfirmCount",
+        "ConePhaseReachedProbabilityThreshold",
+        "ConePhaseCenterTolerance",
+        "ConePhaseDirectionTolerance",
+        "ConePhaseRequiredConfirmFrames",
         "MissionElapsedSec",
         "TargetLat",
         "TargetLng",
     ]
     for col in numeric_cols:
         result[col] = _safe_numeric_series(result, col)
+    for col in (
+        "ConeMethod",
+        "ConeStatus",
+        "ConePenaltyFlags",
+        "ConeStrictRedRejectReason",
+        "ConeCloseReachedRejectReason",
+        "ConePhaseDecision",
+    ):
+        if col not in result.columns:
+            result[col] = ""
     result["sonar_valid"] = (
         result["SonarValid"].fillna(0.0) > 0.0
         if has_sonar_valid
@@ -207,6 +240,7 @@ def build_mission_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     result.attrs["target_lng"] = tgt_lng
     result.attrs["target_x_m"] = (tgt_lng - origin_lng) * meters_per_deg_lng
     result.attrs["target_y_m"] = (tgt_lat - origin_lat) * meters_per_deg_lat
+    result.attrs["cone_diagnostics_available"] = has_cone_diagnostics
     return result
 
 
@@ -244,6 +278,14 @@ def summarize_mission(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float |
         "phase_end": int(phase_series.iloc[-1]) if not phase_series.empty else -1,
         "max_speed_mps": float(df["GpsSpeedMps"].max()) if df["GpsSpeedMps"].notna().any() else 0.0,
         "best_cone_prob": float(df["ConeProb"].max()) if df["ConeProb"].notna().any() else 0.0,
+        "cone_reached_rows": int((df["ConeIsReached"].fillna(0.0) > 0.0).sum()),
+        "cone_close_reached_rows": int((df["ConeCloseReachedOK"].fillna(0.0) > 0.0).sum()),
+        "cone_diagnostics_available": bool(df.attrs.get("cone_diagnostics_available", False)),
+        "cone_valid_ratio": (
+            float((df["ConeValid"].fillna(0.0) > 0.0).mean())
+            if len(df) and df.attrs.get("cone_diagnostics_available", False)
+            else np.nan
+        ),
         "closest_obstacle_cm": float(df.loc[df["sonar_valid"], "ObstacleDist"].replace(0, np.nan).min())
         if df.loc[df["sonar_valid"], "ObstacleDist"].replace(0, np.nan).notna().any()
         else np.nan,
@@ -290,7 +332,11 @@ def build_event_table(df: pd.DataFrame) -> pd.DataFrame:
             }
         )
 
-    cone_mask = df["ConeProb"].fillna(0.0) >= 0.25
+    cone_mask = (
+        (df["ConeProb"].fillna(0.0) >= 0.25)
+        | (df["ConeIsReached"].fillna(0.0) > 0.0)
+        | (df["ConeCloseReachedOK"].fillna(0.0) > 0.0)
+    )
     cone_events = df[cone_mask].copy()
     if not cone_events.empty:
         cone_events["cone_bucket"] = (cone_events["ElapsedSec"].fillna(0.0) / 5.0).astype(int)
@@ -301,7 +347,11 @@ def build_event_table(df: pd.DataFrame) -> pd.DataFrame:
                     "event_type": "cone_detection",
                     "elapsed_sec": float(row["ElapsedSec"]),
                     "phase": int(row["Phase"]) if pd.notna(row["Phase"]) else np.nan,
-                    "label": f"Cone prob={float(row['ConeProb']):.2f} dir={float(row['ConeDir']):.2f}",
+                    "label": (
+                        f"Cone prob={float(row['ConeProb']):.2f} dir={float(row['ConeDir']):.2f} "
+                        f"reached={int(float(row['ConeIsReached'])) if pd.notna(row['ConeIsReached']) else 0} "
+                        f"method={row['ConeMethod']} penalties={row['ConePenaltyFlags']}"
+                    ),
                     "x_m": float(row["x_m"]) if pd.notna(row["x_m"]) else np.nan,
                     "y_m": float(row["y_m"]) if pd.notna(row["y_m"]) else np.nan,
                     "z_m": float(row["z_m"]) if pd.notna(row["z_m"]) else np.nan,
@@ -666,6 +716,13 @@ def write_summary_text(
         f"Altitude range: {summary['altitude_min_rel_m']:.1f}m .. {summary['altitude_max_rel_m']:.1f}m (relative)",
         f"Max GPS speed: {summary['max_speed_mps']:.2f}m/s",
         f"Best cone probability: {summary['best_cone_prob']:.2f}",
+        (
+            f"Cone valid ratio: {summary['cone_valid_ratio']:.1%}"
+            if summary["cone_diagnostics_available"]
+            else "Cone valid ratio: N/A (legacy log schema)"
+        ),
+        f"Cone reached rows: {summary['cone_reached_rows']}",
+        f"Cone close-reached-qualified rows: {summary['cone_close_reached_rows']}",
         f"Closest obstacle: {summary['closest_obstacle_cm']:.1f}cm" if not pd.isna(summary["closest_obstacle_cm"]) else "Closest obstacle: N/A",
         f"Mission end reason: {summary['mission_end_reason'] or 'N/A'}",
         f"Mission start (from log filename): {mission_start_dt.isoformat(sep=' ')}" if mission_start_dt else "Mission start (from log filename): unavailable",
@@ -775,6 +832,32 @@ def analyze_explorer_log(
             "GpsSpeedMps",
             "ConeDir",
             "ConeProb",
+            "ConeValid",
+            "ConeSeq",
+            "ConeStaleSec",
+            "ConeIsDetected",
+            "ConeProbabilityDetected",
+            "ConeIsReached",
+            "ConeRawReached",
+            "ConeCloseReachedOK",
+            "ConeRawProb",
+            "ConeCandidateProb",
+            "ConePreFilterProb",
+            "ConeOccupancy",
+            "ConeFrameRedOccupancy",
+            "ConeROISupport",
+            "ConeROIHistAvailable",
+            "ConeStrictRedOK",
+            "ConeStrictRedRejectReason",
+            "ConeCloseReachedRejectReason",
+            "ConePenaltyFlags",
+            "ConePhaseDecision",
+            "ConePhaseReachedEffective",
+            "ConePhaseConfirmCount",
+            "ConePhaseReachedProbabilityThreshold",
+            "ConePhaseCenterTolerance",
+            "ConePhaseDirectionTolerance",
+            "ConePhaseRequiredConfirmFrames",
             "ObstacleDist",
             "SonarValid",
             "SonarStaleSec",

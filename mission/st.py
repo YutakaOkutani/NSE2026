@@ -1,4 +1,7 @@
 import threading
+import time
+
+from lib.cone_diagnostics import normalize_cone_diagnostics
 
 from mission.const import (
     CONE_CENTER_POSITION,
@@ -47,6 +50,12 @@ class CanSatState:
         self.cone_direction = CONE_CENTER_POSITION
         self.cone_probability = DEFAULT_FLOAT_VALUE
         self.cone_method = ""
+        self.cone_valid = False
+        self.cone_status = "not_started"
+        self.cone_sequence = 0
+        self.cone_updated_at = 0.0
+        self.cone_last_valid_at = 0.0
+        self.cone_debug = normalize_cone_diagnostics()
         self.obstacle_dist = DEFAULT_OBSTACLE_DIST_CM
         self.obstacle_valid = False
         self.obstacle_stale_sec = SONAR_STALE_TIMEOUT_SEC + 1.0
@@ -161,7 +170,18 @@ class CanSatState:
             if phase3_arrived_latched is not None:
                 self.phase3_arrived_latched = phase3_arrived_latched
 
-    def update_cone(self, cone_direction=None, cone_probability=None, cone_is_reached=None, cone_method=None):
+    def update_cone(
+        self,
+        cone_direction=None,
+        cone_probability=None,
+        cone_is_reached=None,
+        cone_method=None,
+        cone_valid=None,
+        cone_status=None,
+        cone_debug=None,
+        observation_time=None,
+        observation_accepted=False,
+    ):
         with self.lock:
             if cone_direction is not None:
                 self.cone_direction = cone_direction
@@ -171,6 +191,33 @@ class CanSatState:
                 self.cone_is_reached = cone_is_reached
             if cone_method is not None:
                 self.cone_method = cone_method
+            if cone_valid is not None:
+                self.cone_valid = bool(cone_valid)
+            if cone_status is not None:
+                self.cone_status = str(cone_status)
+            if observation_time is not None or observation_accepted or cone_valid is not None:
+                observed_at = float(observation_time) if observation_time is not None else time.time()
+                self.cone_updated_at = observed_at
+                if observation_accepted:
+                    self.cone_sequence += 1
+                    if self.cone_valid:
+                        self.cone_last_valid_at = observed_at
+
+            diagnostics = dict(self.cone_debug)
+            if cone_debug is not None:
+                diagnostics.update(cone_debug)
+            diagnostics.update(
+                {
+                    "valid": int(self.cone_valid),
+                    "status": self.cone_status,
+                    "sequence": self.cone_sequence,
+                    "direction": self.cone_direction,
+                    "probability": self.cone_probability,
+                    "method": self.cone_method,
+                    "is_reached": int(bool(self.cone_is_reached)),
+                }
+            )
+            self.cone_debug = normalize_cone_diagnostics(diagnostics)
 
     def update_obstacle(self, obstacle_dist=None, obstacle_valid=None, obstacle_stale_sec=None):
         with self.lock:
@@ -218,6 +265,12 @@ class CanSatState:
                 "cone_direction": self.cone_direction,
                 "cone_probability": self.cone_probability,
                 "cone_method": self.cone_method,
+                "cone_valid": self.cone_valid,
+                "cone_status": self.cone_status,
+                "cone_sequence": self.cone_sequence,
+                "cone_updated_at": self.cone_updated_at,
+                "cone_last_valid_at": self.cone_last_valid_at,
+                "cone_debug": dict(self.cone_debug),
                 "obstacle_dist": self.obstacle_dist,
                 "obstacle_valid": self.obstacle_valid,
                 "obstacle_stale_sec": self.obstacle_stale_sec,

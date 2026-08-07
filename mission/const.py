@@ -1,6 +1,8 @@
 import os
 from enum import IntEnum
 
+from lib.cone_diagnostics import CONE_DIAGNOSTIC_LOG_COLUMNS
+
 
 # 定数定義
 # フェーズ定義
@@ -120,6 +122,10 @@ CONE_PROBABILITY_THRESHOLD_PHASE4 = 0.20
 CONE_PROBABILITY_THRESHOLD_PHASE5 = 0.18
 CONE_PHASE4_CONFIRM_FRAMES = 2
 CONE_PHASE4_CENTER_TOLERANCE = 0.42
+CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE = 0.14
+CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD = 0.28
+CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD = 0.30
+CONE_PHASE5_REACH_CONFIRM_FRAMES = 8
 CONE_PHASE4_STRONG_PROBABILITY = 0.30
 CONE_LOST_COUNT_LIMIT = 10
 CONE_CENTER_POSITION = 0.5
@@ -558,9 +564,25 @@ LOG_HEADER = [
     "Angle",
     "Direction",
     "Fall",
-    "ConeDir",
-    "ConeProb",
-    "ConeMethod",
+    *CONE_DIAGNOSTIC_LOG_COLUMNS,
+    "ConeStaleSec",
+    "ConeUpdatedElapsedSec",
+    "ConePhaseDecision",
+    "ConePhaseThreshold",
+    "ConePhaseReachedProbabilityThreshold",
+    "ConePhaseCenterTolerance",
+    "ConePhaseDirectionTolerance",
+    "ConePhaseRequiredConfirmFrames",
+    "ConePhaseDetected",
+    "ConePhaseReachedEffective",
+    "ConePhaseCentered",
+    "ConePhaseDirectionConsistent",
+    "ConePhaseConfirmCount",
+    "Phase4ConeConfirmCount",
+    "Phase4ConeConfirmMarker",
+    "Phase5ConeLostCount",
+    "Phase5ReachConfirmCount",
+    "Phase5EntryReason",
     "ObstacleDist",
     "SonarValid",
     "SonarStaleSec",

@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 from picamera2 import Picamera2
 
+from lib.cone_diagnostics import CONE_DIAGNOSTIC_SCHEMA_VERSION
+
 
 class detector:
     def __init__(self):
@@ -801,9 +803,9 @@ class detector:
             penalty *= 0.30
         return penalty
 
-    def __strict_red_candidate_ok(self, component, roi_support_ratio):
+    def __strict_red_candidate_reject_reason(self, component, roi_support_ratio):
         if component is None:
-            return False
+            return "no_component"
         hue = float(component.get("hue_redness_score", 0.0))
         sv = float(component.get("sv_score", 0.0))
         shape = float(component.get("cone_shape_score", 0.0))
@@ -814,18 +816,18 @@ class detector:
         bbox_bottom_frac = float((bbox[1] + bbox[3]) / float(self.camera_height)) if self.camera_height > 0 else 0.0
         aspect = float(component.get("aspect", 0.0))
         if hue < self.strict_red_min_hue_score:
-            return False
+            return "hue_below_min"
         if sv < self.strict_red_min_sv_score:
-            return False
+            return "sv_below_min"
         if shape < self.strict_red_min_shape_score:
-            return False
+            return "shape_below_min"
         if prob < self.strict_red_min_prob:
-            return False
+            return "candidate_prob_below_min"
         if self.__ground_band_penalty(width_frac, height_frac, bbox_bottom_frac, aspect, shape) < 0.5:
-            return False
+            return "ground_band_rejected"
         if roi_support_ratio < 0.06 and width_frac > 0.26:
-            return False
-        return True
+            return "wide_without_roi_support"
+        return ""
 
     def __swap_rb_candidate_is_trustworthy(self, candidate):
         if candidate is None:
@@ -968,12 +970,22 @@ class detector:
         occupancy = 0.0
         bbox = None
         is_detected = False
+        candidate_probability = 0.0
+        pre_filter_probability = 0.0
+        strict_red_ok = False
+        strict_red_reject_reason = "no_component"
+        close_region_ok = False
+        dominant_close = False
+        close_reached_reject_reason = "no_dominant_red_component"
+        ground_penalty = 1.0
+        penalty_flags = []
 
         if best_component is not None:
             bbox = best_component["bbox"]
             centroid = best_component["centroid"]
             occupancy = best_component["occupancy"]
             prob = float(max(0.0, min(1.0, best_component["score"])))
+            candidate_probability = prob
             cone_dir = float(best_component["centroid"][0]) / float(self.camera_width)
             is_detected = prob >= self.min_detect_probability
 
@@ -1051,6 +1063,22 @@ class detector:
                 and (roi_support_ratio >= 0.10 or dom_occ >= 0.24)
                 and dom_ground_penalty >= 0.5
             )
+            close_reached_failures = []
+            if not reached:
+                close_reached_failures.append("raw_reached_false")
+            if dom_occ < 0.18:
+                close_reached_failures.append("occupancy_below_min")
+            if dom_hue < 0.60:
+                close_reached_failures.append("hue_below_min")
+            if not reached_shape_ok:
+                close_reached_failures.append("shape_gate_failed")
+            if prob < self.close_reached_min_prob:
+                close_reached_failures.append("probability_below_min")
+            if roi_support_ratio < 0.10 and dom_occ < 0.24:
+                close_reached_failures.append("roi_or_occupancy_gate_failed")
+            if dom_ground_penalty < 0.5:
+                close_reached_failures.append("ground_band_rejected")
+            close_reached_reject_reason = "|".join(close_reached_failures)
 
         if close_reached_ok:
             is_detected = True
@@ -1071,6 +1099,8 @@ class detector:
                     centroid = [cx, cy]
                     cone_dir = float(cx) / float(self.camera_width)
 
+        pre_filter_probability = prob
+
         if cone_dir is None:
             cone_dir = 0.5
 
@@ -1087,6 +1117,7 @@ class detector:
             bbox_bottom_frac = float(top + height) / float(self.camera_height)
             if bbox_top_frac < 0.22 and width_frac > 0.38 and aspect > 1.10 and cone_shape_score < 0.62:
                 prob *= 0.45
+                penalty_flags.append("wide_upper_x0.45")
             if (
                 bbox_top_frac < self.upper_sky_reject_top_frac
                 and bbox_bottom_frac < 0.72
@@ -1095,16 +1126,25 @@ class detector:
                 and cone_shape_score < 0.72
             ):
                 prob *= 0.18
-            prob *= self.__ground_band_penalty(
+                penalty_flags.append("upper_sky_x0.18")
+            ground_penalty = self.__ground_band_penalty(
                 width_frac,
                 height_frac,
                 bbox_bottom_frac,
                 aspect,
                 cone_shape_score,
             )
-            strict_red_ok = self.__strict_red_candidate_ok(best_component, roi_support_ratio)
+            prob *= ground_penalty
+            if ground_penalty < 0.999:
+                penalty_flags.append(f"ground_x{ground_penalty:.2f}")
+            strict_red_reject_reason = self.__strict_red_candidate_reject_reason(
+                best_component,
+                roi_support_ratio,
+            )
+            strict_red_ok = not strict_red_reject_reason
             if not strict_red_ok:
                 prob *= 0.08
+                penalty_flags.append("strict_red_x0.08")
             quality_floor = min(cone_shape_score, hue_redness_score, sv_score)
             if (
                 bbox_bottom_frac < 0.48
@@ -1113,11 +1153,13 @@ class detector:
                 and hue_redness_score < 0.62
             ):
                 prob *= 0.45
+                penalty_flags.append("small_upper_weak_x0.45")
             if (
                 occupancy < 0.10
                 and quality_floor < self.min_detect_quality_floor
             ):
                 prob *= 0.35
+                penalty_flags.append("low_quality_x0.35")
             if bp_mask is not None:
                 pure_red_strong = (
                     cone_shape_score >= 0.72
@@ -1129,19 +1171,26 @@ class detector:
                 if roi_support_ratio < 0.08:
                     if best_mode == "hue" and pure_red_strong:
                         prob *= 0.80
+                        penalty_flags.append("roi_low_strong_hue_x0.80")
                     else:
                         prob *= 0.55
+                        penalty_flags.append("roi_low_x0.55")
                 elif roi_support_ratio < self.roi_hist_min_support_ratio:
                     if best_mode == "hue" and pure_red_strong:
                         prob *= 0.92
+                        penalty_flags.append("roi_partial_strong_hue_x0.92")
                     elif best_mode == "hue":
                         prob *= 0.35
+                        penalty_flags.append("roi_partial_hue_x0.35")
                     else:
                         prob *= 0.78
+                        penalty_flags.append("roi_partial_x0.78")
                 elif best_mode in ("backproj", "hybrid_overlap", "hybrid_union"):
                     prob = max(prob, min(0.36, 0.18 + 2.8 * occupancy))
+                    penalty_flags.append("roi_supported_floor")
                 if best_mode == "backproj" and roi_support_ratio < 0.20:
                     prob *= 0.22
+                    penalty_flags.append("backproj_low_roi_x0.22")
                 # Proven detector behavior is occupancy-first on backprojection.
                 # Rescue that path when ROI support is real and sky-like penalties are not triggered.
                 if (
@@ -1153,6 +1202,7 @@ class detector:
                     and sv_score >= 0.20
                 ):
                     prob = max(prob, min(0.82, 0.34 + 5.5 * occupancy))
+                    penalty_flags.append("backproj_rescue_floor")
             if (
                 bbox_bottom_frac >= 0.55
                 and occupancy < 0.045
@@ -1161,6 +1211,7 @@ class detector:
                 and sv_score >= 0.24
             ):
                 prob = max(prob, min(0.78, 0.26 + 0.40 * cone_shape_score + 0.18 * hue_redness_score + 1.8 * occupancy))
+                penalty_flags.append("small_lower_cone_floor")
 
         legacy_prob = 0.0
         if legacy_component is not None and bp_mask is not None:
@@ -1217,6 +1268,7 @@ class detector:
                 cone_dir = float(centroid[0]) / float(self.camera_width)
                 prob = legacy_prob
                 is_detected = prob >= self.min_detect_probability
+                penalty_flags.append("legacy_backproj_selected")
 
         # Candidate quality to resolve RGB/BGR ambiguity across camera setups.
         overall_score = (
@@ -1244,9 +1296,34 @@ class detector:
             "edge_touch_count": edge_touch,
             "roi_support_ratio": roi_support_ratio,
             "legacy_prob": legacy_prob,
+            "candidate_probability": candidate_probability,
+            "pre_filter_probability": pre_filter_probability,
+            "raw_reached": reached,
+            "close_reached_ok": close_reached_ok,
+            "strict_red_ok": strict_red_ok,
+            "strict_red_reject_reason": strict_red_reject_reason,
+            "close_region_ok": close_region_ok,
+            "dominant_close": dominant_close,
+            "close_reached_reject_reason": close_reached_reject_reason,
+            "ground_penalty": ground_penalty,
+            "penalty_flags": "|".join(penalty_flags),
+            "roi_hist_available": self.__roi_hist is not None,
         }
         if best_component is not None:
             result.update(best_component)
+        result_bbox = result.get("bbox") or [0, 0, 0, 0]
+        result.update(
+            {
+                "bbox_x": int(result_bbox[0]),
+                "bbox_y": int(result_bbox[1]),
+                "bbox_width": int(result_bbox[2]),
+                "bbox_height": int(result_bbox[3]),
+                "bbox_width_frac": float(result_bbox[2]) / float(self.camera_width),
+                "bbox_height_frac": float(result_bbox[3]) / float(self.camera_height),
+                "bbox_bottom_frac": float(result_bbox[1] + result_bbox[3]) / float(self.camera_height),
+                "bbox_aspect": float(result_bbox[2]) / max(float(result_bbox[3]), 1.0),
+            }
+        )
         return result
 
     def detect_cone(self):
@@ -1316,6 +1393,17 @@ class detector:
         self.is_reached = bool(best["is_reached"])
         self.debug_method = best["debug_method"]
         self.debug_scores = {
+            "schema_version": CONE_DIAGNOSTIC_SCHEMA_VERSION,
+            "is_detected": int(bool(self.is_detected)),
+            "probability_detected": int(self.probability >= self.min_detect_probability),
+            "is_reached": int(bool(self.is_reached)),
+            "raw_reached": int(bool(best.get("raw_reached", False))),
+            "close_reached_ok": int(bool(best.get("close_reached_ok", False))),
+            "raw_probability": raw_probability,
+            "candidate_probability": float(best.get("candidate_probability", 0.0)),
+            "pre_filter_probability": float(best.get("pre_filter_probability", 0.0)),
+            "occupancy": float(best.get("occupancy", 0.0)),
+            "frame_red_occupancy": float(best.get("frame_red_occupancy", 0.0)),
             "shape": float(best.get("shape_score", 0.0)),
             "cone_shape": float(best.get("cone_shape_score", 0.0)),
             "aspect": float(best.get("aspect_score", 0.0)),
@@ -1324,6 +1412,28 @@ class detector:
             "occ": float(best.get("occupancy", 0.0)),
             "edge_touch": float(best.get("edge_touch_count", 0.0)),
             "roi_support": float(best.get("roi_support_ratio", 0.0)),
+            "shape_score": float(best.get("shape_score", 0.0)),
+            "cone_shape_score": float(best.get("cone_shape_score", 0.0)),
+            "sv_score": float(best.get("sv_score", 0.0)),
+            "hue_redness_score": float(best.get("hue_redness_score", 0.0)),
+            "roi_support_ratio": float(best.get("roi_support_ratio", 0.0)),
+            "edge_touch_count": int(best.get("edge_touch_count", 0)),
+            "bbox_x": int(best.get("bbox_x", 0)),
+            "bbox_y": int(best.get("bbox_y", 0)),
+            "bbox_width": int(best.get("bbox_width", 0)),
+            "bbox_height": int(best.get("bbox_height", 0)),
+            "bbox_width_frac": float(best.get("bbox_width_frac", 0.0)),
+            "bbox_height_frac": float(best.get("bbox_height_frac", 0.0)),
+            "bbox_bottom_frac": float(best.get("bbox_bottom_frac", 0.0)),
+            "bbox_aspect": float(best.get("bbox_aspect", 0.0)),
+            "strict_red_ok": int(bool(best.get("strict_red_ok", False))),
+            "strict_red_reject_reason": str(best.get("strict_red_reject_reason", "")),
+            "close_region_ok": int(bool(best.get("close_region_ok", False))),
+            "dominant_close": int(bool(best.get("dominant_close", False))),
+            "close_reached_reject_reason": str(best.get("close_reached_reject_reason", "")),
+            "ground_penalty": float(best.get("ground_penalty", 1.0)),
+            "penalty_flags": str(best.get("penalty_flags", "")),
+            "roi_hist_available": int(bool(best.get("roi_hist_available", False))),
             "swap_margin": float(score_margin),
             "swap_used": 1.0 if (cand2 is not None and best is cand2) else 0.0,
             "raw_prob": raw_probability,
@@ -1338,6 +1448,12 @@ class detector:
             "roi_neg_count": float(self.roi_negative_count),
             "roi_pos_weight": float(self.roi_positive_weight),
             "roi_neg_weight": float(self.roi_negative_weight),
+            "roi_positive_count": int(self.roi_positive_count),
+            "roi_negative_count": int(self.roi_negative_count),
+            "roi_positive_weight": float(self.roi_positive_weight),
+            "roi_negative_weight": float(self.roi_negative_weight),
+            "as_is_probability": float(cand1.get("probability", 0.0)),
+            "swap_probability": float(cand2.get("probability", 0.0)) if cand2 is not None else 0.0,
         }
 
         if self.is_reached:

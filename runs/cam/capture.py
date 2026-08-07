@@ -37,7 +37,10 @@ def build_parser():
     parser.add_argument(
         "--outdir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="Base output directory (default: /home/pi/logs_nse2026). A run subfolder is created automatically.",
+        help=(
+            "Base output directory (default: /home/pi/logs_nse2026). "
+            "Artifacts are saved under capture/<timestamp>."
+        ),
     )
     parser.add_argument(
         "--session-name",
@@ -84,7 +87,7 @@ def main():
 
         ts = time.strftime("%Y%m%d_%H%M%S")
         session_suffix = f"_{args.session_name}" if args.session_name else ""
-        outdir = base_outdir / f"capture_{ts}{session_suffix}"
+        outdir = base_outdir / "capture" / f"{ts}{session_suffix}"
         outdir.mkdir(parents=True, exist_ok=True)
         print(f"Run folder: {outdir}")
 

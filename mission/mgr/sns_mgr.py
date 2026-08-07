@@ -9,6 +9,11 @@ import serial
 
 from lib import bno055
 from lib import cone_detect as dc
+from lib.cone_diagnostics import (
+    detector_diagnostics,
+    mission_log_values,
+    normalize_cone_diagnostics,
+)
 
 from mission.const import (
     BMP_ALTITUDE_MAX_VALID,
@@ -160,6 +165,15 @@ class SensorManager:
         calib_values = getattr(self, "bno_calib", {}).get("value", (0, 0, 0, 0))
         if not isinstance(calib_values, (list, tuple)) or len(calib_values) < 4:
             calib_values = (0, 0, 0, 0)
+        cone_debug = dict(current_data.get("cone_debug", {}) or {})
+        cone_last_valid_at = self._coerce_float(current_data.get("cone_last_valid_at", 0.0))
+        cone_updated_at = self._coerce_float(current_data.get("cone_updated_at", 0.0))
+        cone_stale_sec = CAMERA_DEAD_TIMEOUT + 1.0
+        if cone_last_valid_at > 0.0:
+            cone_stale_sec = max(0.0, now - cone_last_valid_at)
+        cone_updated_elapsed_sec = 0.0
+        if mission_start and cone_updated_at > 0.0:
+            cone_updated_elapsed_sec = max(0.0, cone_updated_at - mission_start)
 
         return [
             f"{mission_elapsed_sec:.2f}",
@@ -233,9 +247,25 @@ class SensorManager:
             f"{self._coerce_float(current_data.get('angle', 0.0)):.2f}",
             f"{self._coerce_float(current_data.get('direction', 0.0)):.2f}",
             f"{self._coerce_float(current_data.get('fall', 0.0)):.2f}",
-            f"{self._coerce_float(current_data.get('cone_direction', 0.0)):.2f}",
-            f"{self._coerce_float(current_data.get('cone_probability', 0.0)):.2f}",
-            str(current_data.get("cone_method", "")),
+            *mission_log_values(cone_debug),
+            f"{cone_stale_sec:.2f}",
+            f"{cone_updated_elapsed_sec:.2f}",
+            str(getattr(self, "cone_phase_decision", "not_evaluated")),
+            f"{self._coerce_float(getattr(self, 'cone_phase_threshold', 0.0)):.3f}",
+            f"{self._coerce_float(getattr(self, 'cone_phase_reached_probability_threshold', 0.0)):.3f}",
+            f"{self._coerce_float(getattr(self, 'cone_phase_center_tolerance', 0.0)):.3f}",
+            f"{self._coerce_float(getattr(self, 'cone_phase_direction_tolerance', 0.0)):.3f}",
+            self._coerce_int(getattr(self, "cone_phase_required_confirm_frames", 0)),
+            self._coerce_int(bool(getattr(self, "cone_phase_detected", False))),
+            self._coerce_int(bool(getattr(self, "cone_phase_reached_effective", False))),
+            self._coerce_int(bool(getattr(self, "cone_phase_centered", False))),
+            self._coerce_int(bool(getattr(self, "cone_phase_direction_consistent", False))),
+            self._coerce_int(getattr(self, "cone_phase_confirm_count", 0)),
+            self._coerce_int(getattr(self, "phase4_detect_confirm_count", 0)),
+            f"{self._coerce_float(getattr(self, 'phase4_detect_confirm_marker', 0.0)):.6f}",
+            self._coerce_int(getattr(self, "count_cone_lost", 0)),
+            self._coerce_int(getattr(self, "phase5_reach_confirm_count", 0)),
+            str(getattr(self, "phase5_entry_reason", "unknown")),
             f"{self._coerce_float(current_data.get('obstacle_dist', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("obstacle_valid", False))),
             f"{self._coerce_float(current_data.get('obstacle_stale_sec', 0.0)):.2f}",
@@ -744,6 +774,10 @@ class SensorManager:
                 cone_probability=0.0,
                 cone_is_reached=False,
                 cone_method="detector_unavailable",
+                cone_valid=False,
+                cone_status="detector_unavailable",
+                cone_debug=normalize_cone_diagnostics({"status": "detector_unavailable"}),
+                observation_time=time.time(),
             )
             return
         try:
@@ -758,11 +792,17 @@ class SensorManager:
                 cdir = 1.0 - float(detector.cone_direction)
                 cdir = self._transform_cone_direction_for_control(cdir)
             cone_method = str(getattr(detector, "debug_method", "unknown"))
+            cone_debug = detector_diagnostics(detector, valid=True, status="ok")
             self.st.update_cone(
                 cone_direction=cdir,
                 cone_probability=prob,
                 cone_is_reached=detector.is_reached,
                 cone_method=cone_method,
+                cone_valid=True,
+                cone_status="ok",
+                cone_debug=cone_debug,
+                observation_time=time.time(),
+                observation_accepted=True,
             )
             last_method = getattr(self, "_last_logged_cone_method", None)
             if cone_method != last_method:
@@ -781,6 +821,10 @@ class SensorManager:
                 cone_probability=0.0,
                 cone_is_reached=False,
                 cone_method="camera_error",
+                cone_valid=False,
+                cone_status="camera_error",
+                cone_debug=normalize_cone_diagnostics({"status": "camera_error"}),
+                observation_time=time.time(),
             )
 
     def gps_thread(self):
