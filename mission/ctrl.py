@@ -185,6 +185,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.camera_fail_count = 0
         self.camera_last_reinit = 0.0
         self.camera_dead_since = None
+        self.camera_recovery_started_at = None
+        self.camera_reinit_attempt_count = 0
+        self.camera_recovery_exhausted = False
+        self.phase4_camera_recovery_marker = None
         self.camera_phase4_attempts = 0
         self.camera_phase5_attempts = 0
         self.camera_phase4_start = None
@@ -278,6 +282,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             print(f"Hardware shutdown failed: {exc}")
         self._write_final_log_row()
 
+    def transition_to_give_up(self, reason):
+        """Enter the safe terminal phase without passing through approach/final ram."""
+        self.mission_end_reason = str(reason)
+        self.initialize_phase(Phase.PHASE7)
+        self.stop_motors()
+
     def _resolve_phase7_arrival_reason(self):
         reason = str(getattr(self, "mission_end_reason", "RUNNING"))
         if reason == "GOAL_REACHED":
@@ -286,6 +296,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             return "MISSION_TOTAL_TIMEOUT"
         if reason == "PHASE5_TIMEOUT_FORCED_GOAL":
             return "PHASE5_TIMEOUT_FORCED_GOAL"
+        if reason == "PHASE4_TIMEOUT_GIVE_UP":
+            return "PHASE4_TIMEOUT_GIVE_UP"
+        if reason == "PHASE4_CAMERA_DEAD_GIVE_UP":
+            return "PHASE4_CAMERA_DEAD_GIVE_UP"
         return "OTHER_ABNORMAL_EXIT"
 
     def _write_final_log_row(self):
@@ -400,6 +414,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             f"forcing {next_phase.name}"
         )
         self._commit_active_phase_elapsed(current_phase, now)
+        if current_phase == Phase.PHASE4:
+            self.cone_phase_decision = "p4_cumulative_timeout_to_p7_give_up"
+            self.transition_to_give_up("PHASE4_TIMEOUT_GIVE_UP")
+            return True
         if next_phase == Phase.PHASE6 and self.mission_end_reason == "RUNNING":
             self.mission_end_reason = f"{current_phase.name}_CUM_TIMEOUT_TO_PHASE6"
         self.initialize_phase(next_phase)

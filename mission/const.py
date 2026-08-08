@@ -29,9 +29,6 @@ TIMEOUT_PHASE_2 = 90
 TIMEOUT_PHASE_3 = 5 * 60
 TIMEOUT_PHASE_4 = 60
 TIMEOUT_PHASE_5 = 45
-# Phase4タイムアウト起因でPhase5へ入った場合は、
-# 視覚未検出のまま長時間走行するリスクが高いため短縮する。
-TIMEOUT_PHASE_5_AFTER_PHASE4_TIMEOUT = 20
 DATA_SAMPLING_RATE = 0.20
 GRASS_MIN_MOTOR_SPEED = 45
 # 芝生でストールしないよう、Phase6 の左右輪は最低45%で駆動する。
@@ -80,7 +77,7 @@ MISSION_PHASE_TIMEOUT_TRANSITIONS = {
     Phase.PHASE1: Phase.PHASE2,
     Phase.PHASE2: Phase.PHASE3,
     Phase.PHASE3: Phase.PHASE4,
-    Phase.PHASE4: Phase.PHASE5,
+    Phase.PHASE4: Phase.PHASE7,
     Phase.PHASE5: Phase.PHASE6,
     Phase.PHASE6: Phase.PHASE7,
 }
@@ -157,8 +154,10 @@ CAMERA_IDLE_SLEEP = 0.5
 CAMERA_REINIT_INTERVAL = 5.0
 CAMERA_FAIL_LIMIT = 5
 CAMERA_DEAD_TIMEOUT = 30.0
+CAMERA_REINIT_MAX_ATTEMPTS = 3
+# Phase4では再初期化3回に加え、最後の復帰確認のため最低15秒の猶予を持たせる。
+CAMERA_RECOVERY_GRACE_SEC = 15.0
 CAMERA_CONTROL_INVERT_X = False
-CAMERA_PHASE4_MAX_ATTEMPTS = 3
 CAMERA_PHASE5_MAX_ATTEMPTS = 3
 CAMERA_TEMPORAL_MIN_PROBABILITY = 0.12
 CAMERA_TEMPORAL_STRONG_PROBABILITY = 0.42
@@ -189,9 +188,9 @@ ROI_GLOB_PATTERNS = (
 )
 
 # モーター制御関連定数
-SEARCH_ROTATION_SPEED = 70
+PHASE4_SEARCH_OUTER_SPEED = 90
 # 芝生で低速輪がストールしないよう、Phase4 の全動作で最低45%を保つ。
-SEARCH_ROTATION_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
+PHASE4_SEARCH_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
 PHASE4_SEARCH_SWEEP_INTERVAL = 2.0
 PHASE4_TRACK_ROTATE_GAIN = 60
 PHASE4_TRACK_ROTATE_CLAMP = 18
@@ -583,6 +582,10 @@ LOG_HEADER = [
     "Phase5ConeLostCount",
     "Phase5ReachConfirmCount",
     "Phase5EntryReason",
+    "CameraFailCount",
+    "CameraReinitAttemptCount",
+    "CameraRecoveryElapsedSec",
+    "CameraRecoveryExhausted",
     "ObstacleDist",
     "SonarValid",
     "SonarStaleSec",

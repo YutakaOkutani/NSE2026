@@ -10,8 +10,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from mission.const import (
-    CAMERA_DEAD_TIMEOUT,
-    CAMERA_PHASE4_MAX_ATTEMPTS,
     CONE_CENTER_POSITION,
     CONE_PHASE4_CENTER_TOLERANCE,
     CONE_PHASE4_CONFIRM_FRAMES,
@@ -44,6 +42,17 @@ class Phase4Handler(BasePhaseHandler):
     def execute(self, controller, snapshot):
         led_red = controller.devices.get(DEVICE_LED_RED)
         led_green = controller.devices.get(DEVICE_LED_GREEN)
+        entry_marker = getattr(controller, "phase_entry_time", None)
+        if (
+            entry_marker is not None
+            and getattr(controller, "phase4_camera_recovery_marker", None) != entry_marker
+        ):
+            controller.phase4_camera_recovery_marker = entry_marker
+            recovery_started = getattr(controller, "camera_recovery_started_at", None)
+            # Preserve a campaign started by the camera thread just after this
+            # P4 entry, but discard exhausted/stale state inherited from P3/P5.
+            if recovery_started is None or float(recovery_started) < float(entry_marker):
+                controller.reset_camera_recovery_window()
         current_snapshot = controller.st.snapshot()
         cone_prob = current_snapshot["cone_probability"]
         cone_dir = current_snapshot.get("cone_direction", CONE_CENTER_POSITION)
@@ -104,22 +113,17 @@ class Phase4Handler(BasePhaseHandler):
             controller.camera_phase4_start = controller.time_start_searching_cone
         else:
             if time.time() - controller.time_start_searching_cone >= TIMEOUT_PHASE_4:
-                print("Camera TIMEOUT: Cone not found or Camera dead")
-                controller.cone_phase_decision = "p4_camera_timeout_to_p5"
+                print("Phase4 TIMEOUT: stopping camera phases and giving up")
+                controller.cone_phase_decision = "p4_timeout_to_p7_give_up"
                 controller.searching_flag = False
-                controller.phase5_entry_reason = "phase4_timeout"
-                controller.st.update_navigation(phase=int(Phase.PHASE5))
-                controller.time_phase5_start = time.time()
+                controller.transition_to_give_up("PHASE4_TIMEOUT_GIVE_UP")
                 return
-        camera_dead = (
-            controller.camera_dead_since is not None
-            and time.time() - controller.camera_dead_since >= CAMERA_DEAD_TIMEOUT
-        )
-        if camera_dead and (
-            controller.camera_phase4_attempts >= CAMERA_PHASE4_MAX_ATTEMPTS
-            or (controller.camera_phase4_start is not None and time.time() - controller.camera_phase4_start >= TIMEOUT_PHASE_4)
-        ):
-            self._fallback_to_p3(controller, current_snapshot, "Camera DEAD: Fallback to Phase3 (GPS/Straight)")
+        if bool(getattr(controller, "camera_recovery_exhausted", False)):
+            attempts = int(getattr(controller, "camera_reinit_attempt_count", 0))
+            print(f"Camera DEAD after {attempts} reinit attempts: giving up")
+            controller.cone_phase_decision = "p4_camera_dead_to_p7_give_up"
+            controller.searching_flag = False
+            controller.transition_to_give_up("PHASE4_CAMERA_DEAD_GIVE_UP")
             return
         # Phase4開始時は比較的近距離(数m)のため、誤検知低減のために
         # Phase5より厳しめのprobability + 数フレーム連続確認を要求する。

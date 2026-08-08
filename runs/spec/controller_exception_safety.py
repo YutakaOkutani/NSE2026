@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -121,7 +122,45 @@ class _ShutdownHarness:
         self.actions.append(("log", "final"))
 
 
+class _TimeoutHarness:
+    _handle_timeout_transitions = CanSatController._handle_timeout_transitions
+    _current_phase_elapsed = CanSatController._current_phase_elapsed
+    _commit_active_phase_elapsed = CanSatController._commit_active_phase_elapsed
+
+    def __init__(self):
+        self.mission_start_time = 0.0
+        self.phase_elapsed_totals = {phase: 0.0 for phase in Phase}
+        self.last_phase_observed = Phase.PHASE4
+        self.phase_entry_time = 0.0
+        self.mission_total_timeout_triggered = False
+        self.mission_end_reason = "RUNNING"
+        self.cone_phase_decision = "p4_precheck"
+        self.terminal_phase = None
+        self.motor_stopped = False
+
+    def transition_to_give_up(self, reason):
+        self.mission_end_reason = reason
+        self.terminal_phase = Phase.PHASE7
+        self.motor_stopped = True
+
+
 class ControllerExceptionSafetyTest(unittest.TestCase):
+    def test_phase4_cumulative_timeout_skips_to_terminal_give_up(self):
+        harness = _TimeoutHarness()
+        time_module = CanSatController._handle_timeout_transitions.__globals__["time"]
+
+        with patch.object(time_module, "time", return_value=100.0):
+            handled = harness._handle_timeout_transitions(Phase.PHASE4)
+
+        self.assertTrue(handled)
+        self.assertEqual(harness.terminal_phase, Phase.PHASE7)
+        self.assertTrue(harness.motor_stopped)
+        self.assertEqual(harness.mission_end_reason, "PHASE4_TIMEOUT_GIVE_UP")
+        self.assertEqual(
+            harness.cone_phase_decision,
+            "p4_cumulative_timeout_to_p7_give_up",
+        )
+
     def test_shutdown_stops_workers_and_releases_hardware_before_final_log(self):
         harness = _ShutdownHarness()
 

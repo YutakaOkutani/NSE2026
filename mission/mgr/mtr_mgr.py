@@ -93,8 +93,8 @@ from mission.const import (
     PWM_PERCENT_MAX,
     PWM_PERCENT_MIN,
     RAMP_HALF_DIVISOR,
-    SEARCH_ROTATION_SPEED,
-    SEARCH_ROTATION_INNER_SPEED,
+    PHASE4_SEARCH_OUTER_SPEED,
+    PHASE4_SEARCH_INNER_SPEED,
     TURN_GAIN_SCALE_MAX,
     TURN_GAIN_SCALE_MIN,
     Phase,
@@ -524,9 +524,9 @@ class MotorManager:
             self._update_phase45_filtered_cone_dir(cone_direction, False)
             self._set_forward_pivot_turn(
                 "left",
-                SEARCH_ROTATION_SPEED,
+                PHASE4_SEARCH_OUTER_SPEED,
                 cmd_type="phase4_search_arc",
-                speed_inner=SEARCH_ROTATION_INNER_SPEED,
+                speed_inner=PHASE4_SEARCH_INNER_SPEED,
                 ramp_time=PHASE4_MOTOR_RAMP_TIME,
             )
             return

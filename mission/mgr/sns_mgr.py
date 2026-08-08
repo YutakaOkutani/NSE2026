@@ -41,7 +41,9 @@ from mission.const import (
     CAMERA_DEAD_TIMEOUT,
     CAMERA_FAIL_LIMIT,
     CAMERA_IDLE_SLEEP,
+    CAMERA_RECOVERY_GRACE_SEC,
     CAMERA_REINIT_INTERVAL,
+    CAMERA_REINIT_MAX_ATTEMPTS,
     CONE_CENTER_POSITION,
     DATA_SAMPLING_RATE,
     DEFAULT_BNO_CALIB,
@@ -174,6 +176,10 @@ class SensorManager:
         cone_updated_elapsed_sec = 0.0
         if mission_start and cone_updated_at > 0.0:
             cone_updated_elapsed_sec = max(0.0, cone_updated_at - mission_start)
+        camera_recovery_started_at = getattr(self, "camera_recovery_started_at", None)
+        camera_recovery_elapsed_sec = 0.0
+        if camera_recovery_started_at is not None:
+            camera_recovery_elapsed_sec = max(0.0, now - float(camera_recovery_started_at))
 
         return [
             f"{mission_elapsed_sec:.2f}",
@@ -266,6 +272,10 @@ class SensorManager:
             self._coerce_int(getattr(self, "count_cone_lost", 0)),
             self._coerce_int(getattr(self, "phase5_reach_confirm_count", 0)),
             str(getattr(self, "phase5_entry_reason", "unknown")),
+            self._coerce_int(getattr(self, "camera_fail_count", 0)),
+            self._coerce_int(getattr(self, "camera_reinit_attempt_count", 0)),
+            f"{camera_recovery_elapsed_sec:.2f}",
+            self._coerce_int(bool(getattr(self, "camera_recovery_exhausted", False))),
             f"{self._coerce_float(current_data.get('obstacle_dist', 0.0)):.2f}",
             self._coerce_int(bool(current_data.get("obstacle_valid", False))),
             f"{self._coerce_float(current_data.get('obstacle_stale_sec', 0.0)):.2f}",
@@ -482,11 +492,20 @@ class SensorManager:
 
     def _try_reinit_camera(self, force=False, reason=None):
         now = time.time()
+        attempts = int(getattr(self, "camera_reinit_attempt_count", 0))
+        if (not force) and attempts >= CAMERA_REINIT_MAX_ATTEMPTS:
+            self._update_camera_recovery_exhausted(now)
+            return False
         if (not force) and now - self.camera_last_reinit < CAMERA_REINIT_INTERVAL:
-            return
+            return False
         self.camera_last_reinit = now
+        self.camera_reinit_attempt_count = attempts + 1
         if reason:
             print(f"Camera: Reinit requested ({reason}).")
+        print(
+            "Camera: Reinit attempt "
+            f"{self.camera_reinit_attempt_count}/{CAMERA_REINIT_MAX_ATTEMPTS}."
+        )
         try:
             if hasattr(self, "_release_camera_detector"):
                 self._release_camera_detector()
@@ -496,11 +515,55 @@ class SensorManager:
                 roi_reference = getattr(self, "roi_img", None)
             detector.set_roi_img(roi_reference)
             self.devices[DEVICE_DETECTOR] = detector
+            # Give the recreated detector a fresh capture window, but keep the
+            # recovery campaign active until an actual frame is accepted.
             self.camera_fail_count = 0
-            self.camera_dead_since = None
-            print("Camera: Reinitialized.")
+            print("Camera: Detector recreated; waiting for a valid frame.")
+            return True
         except Exception as exc:
             print(f"Camera: Reinit error {exc}.")
+            self._update_camera_recovery_exhausted(time.time())
+            return False
+
+    def _begin_camera_recovery(self, now=None):
+        now = time.time() if now is None else float(now)
+        if getattr(self, "camera_recovery_started_at", None) is None:
+            self.camera_recovery_started_at = now
+        if getattr(self, "camera_dead_since", None) is None:
+            self.camera_dead_since = now
+        self.camera_recovery_exhausted = False
+
+    def reset_camera_recovery_window(self):
+        """Grant a fresh bounded recovery campaign when navigation reaches P4."""
+        self.camera_fail_count = 0
+        self.camera_last_reinit = 0.0
+        self.camera_dead_since = None
+        self.camera_recovery_started_at = None
+        self.camera_reinit_attempt_count = 0
+        self.camera_recovery_exhausted = False
+        print("Camera: Fresh Phase4 recovery window armed.")
+
+    def _update_camera_recovery_exhausted(self, now=None):
+        now = time.time() if now is None else float(now)
+        started = getattr(self, "camera_recovery_started_at", None)
+        attempts = int(getattr(self, "camera_reinit_attempt_count", 0))
+        exhausted = (
+            started is not None
+            and attempts >= CAMERA_REINIT_MAX_ATTEMPTS
+            and now - float(started) >= CAMERA_RECOVERY_GRACE_SEC
+        )
+        self.camera_recovery_exhausted = bool(exhausted)
+        return bool(exhausted)
+
+    def _record_camera_recovered(self):
+        was_recovering = getattr(self, "camera_recovery_started_at", None) is not None
+        self.camera_fail_count = 0
+        self.camera_dead_since = None
+        self.camera_recovery_started_at = None
+        self.camera_reinit_attempt_count = 0
+        self.camera_recovery_exhausted = False
+        if was_recovering:
+            print("Camera: Recovery confirmed by a valid frame.")
 
     def get_bno_data(self):
         bno_instance = self.devices.get(DEVICE_BNO)
@@ -766,9 +829,10 @@ class SensorManager:
     def cone_detect(self):
         detector = self.devices.get(DEVICE_DETECTOR)
         if detector is None:
-            if self.camera_dead_since is None:
-                self.camera_dead_since = time.time()
+            now = time.time()
+            self._begin_camera_recovery(now)
             self._try_reinit_camera()
+            self._update_camera_recovery_exhausted(time.time())
             self.st.update_cone(
                 cone_direction=CONE_CENTER_POSITION,
                 cone_probability=0.0,
@@ -808,14 +872,12 @@ class SensorManager:
             if cone_method != last_method:
                 print(f"Cone detector method: {cone_method}")
                 self._last_logged_cone_method = cone_method
-            self.camera_fail_count = 0
-            self.camera_dead_since = None
+            self._record_camera_recovered()
         except Exception:
             self.camera_fail_count += 1
             if self.camera_fail_count >= CAMERA_FAIL_LIMIT:
                 self.devices[DEVICE_DETECTOR] = None
-                if self.camera_dead_since is None:
-                    self.camera_dead_since = time.time()
+                self._begin_camera_recovery(time.time())
             self.st.update_cone(
                 cone_direction=CONE_CENTER_POSITION,
                 cone_probability=0.0,

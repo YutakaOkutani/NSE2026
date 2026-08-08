@@ -103,7 +103,7 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 70))
+        self.assertEqual((args[0], args[2]), (45, 90))
         self.assertGreaterEqual(min(args[0], args[2]), 45.0)
         self.assertTrue(args[1])
         self.assertTrue(args[3])

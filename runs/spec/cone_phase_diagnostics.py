@@ -31,14 +31,69 @@ class _VisionController:
         self.phase5_reach_confirm_count = 0
         self.phase5_entry_marker = 1.0
         self.phase_entry_time = 1.0
+        self.phase4_camera_recovery_marker = 1.0
         self.phase5_timeout_limit_sec = 45.0
         self.phase5_entry_reason = "phase4_detected"
         self.time_camera_start = 99.0
         self.count_cone_lost = 0
         self.led_blink_timer = 0
+        self.camera_recovery_exhausted = False
+        self.camera_reinit_attempt_count = 0
+        self.mission_end_reason = "RUNNING"
+        self.stop_motor_calls = 0
+        self.recovery_reset_calls = 0
+
+    def transition_to_give_up(self, reason):
+        self.mission_end_reason = reason
+        self.st.update_navigation(phase=int(Phase.PHASE7))
+        self.stop_motor_calls += 1
+
+    def reset_camera_recovery_window(self):
+        self.camera_recovery_exhausted = False
+        self.camera_reinit_attempt_count = 0
+        self.camera_recovery_started_at = None
+        self.recovery_reset_calls += 1
 
 
 class ConePhaseDiagnosticsTest(unittest.TestCase):
+    def test_new_phase4_entry_rearms_stale_camera_recovery_before_give_up(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        ctrl.phase4_camera_recovery_marker = 0.0
+        ctrl.camera_recovery_started_at = 0.5
+        ctrl.camera_recovery_exhausted = True
+        ctrl.camera_reinit_attempt_count = 3
+
+        with patch("mission.phases.p4.time.time", return_value=100.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE4))
+        self.assertEqual(ctrl.recovery_reset_calls, 1)
+        self.assertEqual(ctrl.mission_end_reason, "RUNNING")
+
+    def test_phase4_timeout_stops_and_skips_directly_to_phase7(self):
+        ctrl = _VisionController(Phase.PHASE4)
+
+        with patch("mission.phases.p4.time.time", return_value=160.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE7))
+        self.assertEqual(ctrl.mission_end_reason, "PHASE4_TIMEOUT_GIVE_UP")
+        self.assertEqual(ctrl.cone_phase_decision, "p4_timeout_to_p7_give_up")
+        self.assertEqual(ctrl.stop_motor_calls, 1)
+
+    def test_phase4_camera_recovery_exhaustion_gives_up(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        ctrl.camera_recovery_exhausted = True
+        ctrl.camera_reinit_attempt_count = 3
+
+        with patch("mission.phases.p4.time.time", return_value=100.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE7))
+        self.assertEqual(ctrl.mission_end_reason, "PHASE4_CAMERA_DEAD_GIVE_UP")
+        self.assertEqual(ctrl.cone_phase_decision, "p4_camera_dead_to_p7_give_up")
+        self.assertEqual(ctrl.stop_motor_calls, 1)
+
     def test_phase4_records_direction_consistency_reset(self):
         ctrl = _VisionController(Phase.PHASE4)
         ctrl.phase4_detect_confirm_count = 1

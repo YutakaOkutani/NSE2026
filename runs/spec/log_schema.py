@@ -87,6 +87,10 @@ class LogSchemaTest(unittest.TestCase):
         ctrl.count_cone_lost = 0
         ctrl.phase5_reach_confirm_count = 0
         ctrl.phase5_entry_reason = "phase4_detected"
+        ctrl.camera_fail_count = 5
+        ctrl.camera_reinit_attempt_count = 2
+        ctrl.camera_recovery_started_at = 100.0
+        ctrl.camera_recovery_exhausted = False
         ctrl.st.update_cone(
             cone_direction=0.73,
             cone_probability=0.08,
@@ -128,6 +132,10 @@ class LogSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["ConePhaseDirectionTolerance"], "0.140")
         self.assertEqual(by_name["ConePhaseRequiredConfirmFrames"], 2)
         self.assertEqual(by_name["ConePhaseConfirmCount"], 1)
+        self.assertEqual(by_name["CameraFailCount"], 5)
+        self.assertEqual(by_name["CameraReinitAttemptCount"], 2)
+        self.assertEqual(by_name["CameraRecoveryElapsedSec"], "2.00")
+        self.assertEqual(by_name["CameraRecoveryExhausted"], 0)
 
     def test_radio_columns_are_written_to_log_row(self):
         ctrl = _LogOnlyController()

@@ -116,7 +116,7 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
 
         self.assertEqual(
             (phase4_search_left["speed_left"], phase4_search_left["speed_right"]),
-            (45.0, 70.0),
+            (45.0, 90.0),
         )
         self.assertEqual(
             (phase4_align_left["speed_left"], phase4_align_left["speed_right"]),

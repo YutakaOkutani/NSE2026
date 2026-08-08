@@ -23,7 +23,6 @@ from mission.const import (
     GPS_PHASE45_MAX_DISTANCE,
     LED_INTERVAL_PHASE5,
     Phase,
-    TIMEOUT_PHASE_5_AFTER_PHASE4_TIMEOUT,
     TIMEOUT_PHASE_5,
 )
 from mission.nav import calc_distance_and_azimuth
@@ -48,11 +47,7 @@ class Phase5Handler(BasePhaseHandler):
             need_phase5_init = getattr(controller, "time_camera_start", 0.0) <= 0.0
         if need_phase5_init:
             entry_reason = str(getattr(controller, "phase5_entry_reason", "unknown"))
-            timeout_limit = (
-                TIMEOUT_PHASE_5_AFTER_PHASE4_TIMEOUT
-                if entry_reason == "phase4_timeout"
-                else TIMEOUT_PHASE_5
-            )
+            timeout_limit = TIMEOUT_PHASE_5
             print(f"p5 : approaching ({entry_reason}, timeout={timeout_limit:.1f}s)")
             controller.phase5_entry_marker = entry_marker
             controller.phase5_timeout_limit_sec = float(timeout_limit)

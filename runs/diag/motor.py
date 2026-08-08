@@ -50,8 +50,8 @@ from mission.const import (
     PIN_PH1,
     PIN_PH2,
     PWM_FREQ,
-    SEARCH_ROTATION_INNER_SPEED,
-    SEARCH_ROTATION_SPEED,
+    PHASE4_SEARCH_INNER_SPEED,
+    PHASE4_SEARCH_OUTER_SPEED,
 )
 from mission.motor_map import (
     get_manual_drive_pattern,
@@ -291,9 +291,9 @@ PHASE_DRIVE_PROFILES = {
             "search_arc",
             "P4 production camera-search arc; A reproduces phase4_search_arc.",
             _wasd_commands(
-                SEARCH_ROTATION_SPEED,
-                SEARCH_ROTATION_SPEED,
-                SEARCH_ROTATION_INNER_SPEED,
+                PHASE4_SEARCH_OUTER_SPEED,
+                PHASE4_SEARCH_OUTER_SPEED,
+                PHASE4_SEARCH_INNER_SPEED,
                 PHASE4_MOTOR_RAMP_TIME,
             ),
         ),
