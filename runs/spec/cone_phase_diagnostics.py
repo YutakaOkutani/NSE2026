@@ -43,6 +43,26 @@ class _VisionController:
         self.stop_motor_calls = 0
         self.recovery_reset_calls = 0
 
+    def update_cone_frame(
+        self,
+        *,
+        direction=0.5,
+        probability=0.0,
+        reached=False,
+        observation_time=100.0,
+        debug=None,
+    ):
+        self.st.update_cone(
+            cone_direction=direction,
+            cone_probability=probability,
+            cone_is_reached=reached,
+            cone_valid=True,
+            cone_status="ok",
+            cone_debug=debug,
+            observation_time=observation_time,
+            observation_accepted=True,
+        )
+
     def transition_to_give_up(self, reason):
         self.mission_end_reason = reason
         self.st.update_navigation(phase=int(Phase.PHASE7))
@@ -98,7 +118,7 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         ctrl = _VisionController(Phase.PHASE4)
         ctrl.phase4_detect_confirm_count = 1
         ctrl.phase4_detect_confirm_marker = 0.73
-        ctrl.st.update_cone(cone_direction=0.91, cone_probability=0.30, cone_is_reached=False)
+        ctrl.update_cone_frame(direction=0.91, probability=0.30)
 
         with patch("mission.phases.p4.time.time", return_value=100.0):
             Phase4Handler().execute(ctrl, ctrl.st.snapshot())
@@ -112,7 +132,7 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
 
     def test_phase4_records_reached_signal_rejected_by_probability_gate(self):
         ctrl = _VisionController(Phase.PHASE4)
-        ctrl.st.update_cone(cone_direction=0.50, cone_probability=0.08, cone_is_reached=True)
+        ctrl.update_cone_frame(direction=0.50, probability=0.08, reached=True)
 
         with patch("mission.phases.p4.time.time", return_value=100.0):
             Phase4Handler().execute(ctrl, ctrl.st.snapshot())
@@ -123,7 +143,7 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
 
     def test_phase5_records_reached_signal_rejected_by_probability_gate(self):
         ctrl = _VisionController(Phase.PHASE5)
-        ctrl.st.update_cone(cone_direction=0.50, cone_probability=0.08, cone_is_reached=True)
+        ctrl.update_cone_frame(direction=0.50, probability=0.08, reached=True)
 
         with patch("mission.phases.p5.time.time", return_value=100.0):
             Phase5Handler().execute(ctrl, ctrl.st.snapshot())
@@ -132,6 +152,70 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         self.assertFalse(ctrl.cone_phase_reached_effective)
         self.assertEqual(ctrl.cone_phase_reached_probability_threshold, 0.30)
         self.assertEqual(ctrl.cone_phase_required_confirm_frames, 8)
+
+    def test_phase4_confirmation_counts_each_camera_sequence_once(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        ctrl.update_cone_frame(direction=0.50, probability=0.30)
+
+        with patch("mission.phases.p4.time.time", return_value=100.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE4))
+        self.assertEqual(ctrl.phase4_detect_confirm_count, 1)
+        self.assertEqual(ctrl.cone_phase_decision, "p4_wait_new_frame")
+
+        ctrl.update_cone_frame(direction=0.51, probability=0.31, observation_time=100.1)
+        with patch("mission.phases.p4.time.time", return_value=100.1):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
+
+    def test_phase5_loss_counts_each_camera_sequence_once(self):
+        ctrl = _VisionController(Phase.PHASE5)
+        ctrl.update_cone_frame(probability=0.0)
+
+        with patch("mission.phases.p5.time.time", return_value=100.0):
+            Phase5Handler().execute(ctrl, ctrl.st.snapshot())
+            Phase5Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.count_cone_lost, 1)
+        self.assertEqual(ctrl.cone_phase_decision, "p5_wait_new_frame")
+
+    def test_phase4_stale_frame_is_not_counted(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        ctrl.update_cone_frame(direction=0.50, probability=0.50, observation_time=90.0)
+
+        with patch("mission.phases.p4.time.time", return_value=100.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.phase4_detect_confirm_count, 0)
+        self.assertEqual(ctrl.cone_phase_decision, "p4_camera_stale_wait")
+
+    def test_phase4_relaxed_candidate_requires_four_distinct_frames(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        debug = {
+            "candidate_probability": 0.32,
+            "cone_shape_score": 0.55,
+            "hue_redness_score": 0.50,
+            "sv_score": 0.40,
+        }
+
+        for idx in range(4):
+            now = 100.0 + idx * 0.1
+            ctrl.update_cone_frame(
+                direction=0.50 + idx * 0.01,
+                probability=0.12,
+                observation_time=now,
+                debug=debug,
+            )
+            with patch("mission.phases.p4.time.time", return_value=now):
+                Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+            if idx < 3:
+                self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE4))
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
+        self.assertEqual(ctrl.cone_phase_decision, "p4_weak_confirmed_to_p5")
 
 
 if __name__ == "__main__":

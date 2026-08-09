@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from mission.const import (
     CAMERA_DEAD_TIMEOUT,
+    CAMERA_FRAME_STALE_STOP_SEC,
     CAMERA_PHASE5_MAX_ATTEMPTS,
     CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
     CONE_PHASE5_REACH_CONFIRM_FRAMES,
@@ -29,6 +30,23 @@ from mission.nav import calc_distance_and_azimuth
 from mission.phases.base import BasePhaseHandler
 
 class Phase5Handler(BasePhaseHandler):
+    @staticmethod
+    def _float_value(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _fresh_camera_frame(self, snapshot, now):
+        sequence = int(self._float_value(snapshot.get("cone_sequence", 0), 0.0))
+        updated_at = self._float_value(snapshot.get("cone_updated_at", 0.0), 0.0)
+        age = float("inf") if updated_at <= 0.0 else max(0.0, now - updated_at)
+        return (
+            bool(snapshot.get("cone_valid", False))
+            and sequence > 0
+            and age <= float(CAMERA_FRAME_STALE_STOP_SEC)
+        ), sequence
+
     def _fallback_to_p3(self, controller, current_snapshot, reason):
         fallback_dir = current_snapshot["angle"] if current_snapshot["angle_valid"] else current_snapshot["direction"]
         print(reason)
@@ -54,6 +72,7 @@ class Phase5Handler(BasePhaseHandler):
             controller.time_camera_start = time.time()
             controller.count_cone_lost = 0
             controller.phase5_reach_confirm_count = 0
+            controller.phase5_last_processed_cone_seq = 0
             controller.camera_phase5_attempts += 1
             controller.camera_phase5_start = controller.time_camera_start
         controller.cone_phase_decision = "p5_precheck"
@@ -109,7 +128,9 @@ class Phase5Handler(BasePhaseHandler):
         is_reach = current_snapshot["cone_is_reached"]
         # 近距離時はprobabilityが落ちても、到達判定が立っていれば見失い扱いにしない
         cone_prob = current_snapshot["cone_probability"]
-        is_reach_effective = bool(is_reach) and (
+        now = time.time()
+        camera_fresh, cone_sequence = self._fresh_camera_frame(current_snapshot, now)
+        is_reach_effective = camera_fresh and bool(is_reach) and (
             cone_prob
             > max(
                 CONE_PROBABILITY_THRESHOLD_PHASE5,
@@ -119,7 +140,6 @@ class Phase5Handler(BasePhaseHandler):
         is_det = (cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE5) or is_reach_effective
         controller.cone_phase_detected = bool(is_det)
         controller.cone_phase_reached_effective = bool(is_reach_effective)
-        now = time.time()
         camera_dead = (
             controller.camera_dead_since is not None
             and now - controller.camera_dead_since >= CAMERA_DEAD_TIMEOUT
@@ -130,6 +150,19 @@ class Phase5Handler(BasePhaseHandler):
         ):
             self._fallback_to_p3(controller, current_snapshot, "Camera DEAD: Fallback to Phase3 (GPS/Straight)")
             return
+        if not camera_fresh:
+            controller.cone_phase_detected = False
+            controller.cone_phase_reached_effective = False
+            controller.cone_phase_decision = (
+                "p5_wait_first_camera_frame"
+                if cone_sequence <= 0
+                else "p5_camera_stale_wait"
+            )
+            return
+        if cone_sequence == int(getattr(controller, "phase5_last_processed_cone_seq", 0)):
+            controller.cone_phase_decision = "p5_wait_new_frame"
+            return
+        controller.phase5_last_processed_cone_seq = cone_sequence
 
         if not is_det:
             controller.cone_phase_decision = "p5_cone_lost_counting"
@@ -144,6 +177,7 @@ class Phase5Handler(BasePhaseHandler):
         if controller.count_cone_lost >= CONE_LOST_COUNT_LIMIT:
             controller.cone_phase_decision = "p5_cone_lost_to_p4"
             print("Phase5 -> Phase4: cone lost")
+            controller.phase4_last_processed_cone_seq = 0
             controller.st.update_navigation(phase=int(Phase.PHASE4))
             return
 

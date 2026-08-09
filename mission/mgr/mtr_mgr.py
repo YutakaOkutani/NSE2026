@@ -4,6 +4,13 @@ import time
 from mission.const import (
     APPROACH_TURN_GAIN,
     BASE_SPEED,
+    CAMERA_FRAME_STALE_STOP_SEC,
+    CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
+    CAMERA_WEAK_MIN_HUE_SCORE,
+    CAMERA_WEAK_MIN_SHAPE_SCORE,
+    CAMERA_WEAK_MIN_SV_SCORE,
+    CAMERA_WEAK_RELAXED_SV_SCORE,
+    CAMERA_WEAK_STRONG_HUE_SCORE,
     CONE_CENTER_POSITION,
     CONE_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD_PHASE4,
@@ -33,11 +40,17 @@ from mission.const import (
     PHASE1_SOFTSTART_RAMP_TIME,
     PHASE1_SOFTSTART_STEP,
     PHASE4_SEARCH_SWEEP_INTERVAL,
+    PHASE4_CAMERA_OBSERVE_FRAMES,
+    PHASE4_CAMERA_OBSERVE_TIMEOUT_SEC,
+    PHASE4_CAMERA_SETTLE_SEC,
     PHASE4_ALIGN_FORWARD_SPEED,
     PHASE4_ALIGN_INNER_SPEED,
     PHASE4_ALIGN_PIVOT_SPEED,
     PHASE4_ALIGN_STOP_DEADBAND,
     PHASE4_MOTOR_RAMP_TIME,
+    PHASE4_REACQUIRE_TURN_SEC,
+    PHASE4_WEAK_OBSERVE_FRAMES,
+    PHASE4_WEAK_OBSERVE_TIMEOUT_SEC,
     PHASE45_CONE_DIR_FILTER_ALPHA,
     PHASE45_MOTOR_LOOP_INTERVAL,
     PHASE5_BASE_SPEED,
@@ -487,6 +500,124 @@ class MotorManager:
         self.phase45_filtered_cone_dir = None
         self.phase45_last_seen_time = None
 
+    def _reset_phase4_search_cycle(self, now=None):
+        now = time.time() if now is None else float(now)
+        last_candidate = getattr(self, "phase45_filtered_cone_dir", None)
+        self.phase4_search_state = (
+            "reacquire" if last_candidate is not None else "wait_camera"
+        )
+        self.phase4_search_drive_started_at = now
+        self.phase4_observe_started_at = None
+        self.phase4_observe_capture_seq = None
+        self.phase4_observe_settle_until = None
+        self.phase4_reacquire_until = (
+            now + float(PHASE4_REACQUIRE_TURN_SEC)
+            if last_candidate is not None
+            else None
+        )
+        self.phase4_last_candidate_dir = last_candidate
+
+    @staticmethod
+    def _snapshot_float(snapshot, key, default=0.0):
+        try:
+            return float(snapshot.get(key, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _camera_observation_fresh(self, snapshot, now=None):
+        now = time.time() if now is None else float(now)
+        sequence = int(self._snapshot_float(snapshot, "cone_sequence", 0.0))
+        updated_at = self._snapshot_float(snapshot, "cone_updated_at", 0.0)
+        if updated_at <= 0.0:
+            return False
+        age = max(0.0, now - updated_at)
+        return bool(
+            snapshot.get("cone_valid", False)
+            and sequence > 0
+            and age <= float(CAMERA_FRAME_STALE_STOP_SEC)
+        )
+
+    def _phase4_weak_candidate_seen(self, snapshot):
+        debug = dict(snapshot.get("cone_debug", {}) or {})
+        candidate_prob = self._snapshot_float(
+            debug, "candidate_probability", 0.0
+        )
+        shape = self._snapshot_float(debug, "cone_shape_score", 0.0)
+        hue = self._snapshot_float(debug, "hue_redness_score", 0.0)
+        sv = self._snapshot_float(debug, "sv_score", 0.0)
+        ground_penalty = self._snapshot_float(debug, "ground_penalty", 1.0)
+        bbox_height = self._snapshot_float(debug, "bbox_height", 0.0)
+        bbox_bottom = self._snapshot_float(debug, "bbox_bottom_frac", 0.0)
+        penalty_flags = str(debug.get("penalty_flags", ""))
+        color_quality = (
+            hue >= CAMERA_WEAK_MIN_HUE_SCORE and sv >= CAMERA_WEAK_MIN_SV_SCORE
+        ) or (
+            hue >= CAMERA_WEAK_STRONG_HUE_SCORE
+            and sv >= CAMERA_WEAK_RELAXED_SV_SCORE
+        )
+        return bool(
+            candidate_prob >= CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY
+            and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE
+            and color_quality
+            and ground_penalty >= 0.5
+            and "upper_sky" not in penalty_flags
+            and (bbox_height <= 0.0 or bbox_bottom >= 0.35)
+        )
+
+    def _begin_phase4_observation(self, mode, snapshot, now):
+        self.phase4_search_state = str(mode)
+        self.phase4_observe_started_at = float(now)
+        self.phase4_observe_capture_seq = None
+        self.phase4_observe_settle_until = float(now) + float(PHASE4_CAMERA_SETTLE_SEC)
+        if str(mode) == "weak_observe":
+            try:
+                self.phase4_last_candidate_dir = float(snapshot.get("cone_direction"))
+            except (TypeError, ValueError):
+                pass
+        self.stop_motors()
+
+    def _phase4_observation_complete(self, snapshot, now, weak_mode):
+        settle_until = getattr(self, "phase4_observe_settle_until", None)
+        if settle_until is not None and now < float(settle_until):
+            return False
+        sequence = int(self._snapshot_float(snapshot, "cone_sequence", 0.0))
+        capture_seq = getattr(self, "phase4_observe_capture_seq", None)
+        if capture_seq is None:
+            self.phase4_observe_capture_seq = sequence
+            return False
+        frames = max(0, sequence - int(capture_seq))
+        started_at = getattr(self, "phase4_observe_started_at", now)
+        elapsed = max(0.0, now - float(started_at))
+        target_frames = (
+            PHASE4_WEAK_OBSERVE_FRAMES
+            if weak_mode
+            else PHASE4_CAMERA_OBSERVE_FRAMES
+        )
+        timeout = (
+            PHASE4_WEAK_OBSERVE_TIMEOUT_SEC
+            if weak_mode
+            else PHASE4_CAMERA_OBSERVE_TIMEOUT_SEC
+        )
+        return frames >= int(target_frames) or elapsed >= float(timeout)
+
+    def _drive_phase4_toward_last_candidate(self):
+        last_dir = getattr(self, "phase4_last_candidate_dir", None)
+        try:
+            error = float(last_dir) - CONE_CENTER_POSITION
+        except (TypeError, ValueError):
+            return False
+        if abs(error) <= float(PHASE4_ALIGN_STOP_DEADBAND):
+            return False
+        turn_side = "right" if error > 0.0 else "left"
+        self._set_forward_pivot_turn(
+            turn_side,
+            PHASE4_ALIGN_PIVOT_SPEED,
+            cmd_type="phase4_reacquire_last_candidate",
+            speed_inner=PHASE4_ALIGN_INNER_SPEED,
+            ramp_time=PHASE4_MOTOR_RAMP_TIME,
+        )
+        return True
+
     def _update_phase45_filtered_cone_dir(self, raw_cone_direction, cone_seen):
         if not cone_seen:
             return getattr(self, "phase45_filtered_cone_dir", None)
@@ -515,51 +646,115 @@ class MotorManager:
 
     def _drive_phase4_camera(self, snapshot):
         """Apply one production Phase4 search/alignment motor decision."""
+        now = time.time()
+        if not self._camera_observation_fresh(snapshot, now):
+            self.phase4_search_state = "wait_camera"
+            self.stop_motors()
+            return
+        state = getattr(self, "phase4_search_state", "wait_camera")
+        if state == "wait_camera":
+            self.phase4_search_state = "drive"
+            self.phase4_search_drive_started_at = now
+            state = "drive"
         cone_seen = self._phase45_cone_seen(
             snapshot,
             CONE_PROBABILITY_THRESHOLD_PHASE4,
         )
         cone_direction = snapshot.get("cone_direction", CONE_CENTER_POSITION)
-        if not cone_seen:
-            self._update_phase45_filtered_cone_dir(cone_direction, False)
+        weak_seen = self._phase4_weak_candidate_seen(snapshot)
+        if cone_seen:
+            filtered_direction = self._update_phase45_filtered_cone_dir(
+                cone_direction,
+                True,
+            )
+            self.phase4_last_candidate_dir = filtered_direction
+            self.phase4_search_state = "track"
+            if filtered_direction is None:
+                filtered_direction = CONE_CENTER_POSITION
+            error = filtered_direction - CONE_CENTER_POSITION
+            if abs(error) <= float(PHASE4_ALIGN_STOP_DEADBAND):
+                self.set_motors(
+                    PHASE4_ALIGN_FORWARD_SPEED,
+                    True,
+                    PHASE4_ALIGN_FORWARD_SPEED,
+                    True,
+                    ramp_time=PHASE4_MOTOR_RAMP_TIME,
+                    cmd_type="phase4_camera_center_forward",
+                )
+                return
+            turn_side = "right" if error > 0.0 else "left"
             self._set_forward_pivot_turn(
-                "left",
-                PHASE4_SEARCH_OUTER_SPEED,
-                cmd_type="phase4_search_arc",
-                speed_inner=PHASE4_SEARCH_INNER_SPEED,
+                turn_side,
+                PHASE4_ALIGN_PIVOT_SPEED,
+                cmd_type="phase4_camera_align_arc",
+                speed_inner=PHASE4_ALIGN_INNER_SPEED,
                 ramp_time=PHASE4_MOTOR_RAMP_TIME,
             )
             return
 
-        filtered_direction = self._update_phase45_filtered_cone_dir(
-            cone_direction,
-            True,
-        )
-        if filtered_direction is None:
-            filtered_direction = CONE_CENTER_POSITION
-        error = filtered_direction - CONE_CENTER_POSITION
-        if abs(error) <= float(PHASE4_ALIGN_STOP_DEADBAND):
-            self.set_motors(
-                PHASE4_ALIGN_FORWARD_SPEED,
-                True,
-                PHASE4_ALIGN_FORWARD_SPEED,
-                True,
-                ramp_time=PHASE4_MOTOR_RAMP_TIME,
-                cmd_type="phase4_camera_center_forward",
-            )
+        self._update_phase45_filtered_cone_dir(cone_direction, False)
+        if state == "observe" and weak_seen:
+            self._begin_phase4_observation("weak_observe", snapshot, now)
             return
 
-        turn_side = "right" if error > 0.0 else "left"
+        if state in ("observe", "weak_observe"):
+            weak_mode = state == "weak_observe"
+            if weak_seen:
+                try:
+                    self.phase4_last_candidate_dir = float(cone_direction)
+                except (TypeError, ValueError):
+                    pass
+            self.stop_motors()
+            if not self._phase4_observation_complete(snapshot, now, weak_mode):
+                return
+            if weak_mode:
+                self.phase4_search_state = "reacquire"
+                self.phase4_reacquire_until = now + float(PHASE4_REACQUIRE_TURN_SEC)
+            else:
+                self.phase4_search_state = "drive"
+                self.phase4_search_drive_started_at = now
+            return
+
+        if weak_seen:
+            self._begin_phase4_observation("weak_observe", snapshot, now)
+            return
+
+        if state == "track":
+            self.phase4_search_state = "reacquire"
+            self.phase4_reacquire_until = now + float(PHASE4_REACQUIRE_TURN_SEC)
+            state = "reacquire"
+
+        if state == "reacquire":
+            reacquire_until = getattr(self, "phase4_reacquire_until", now)
+            if now < float(reacquire_until) and self._drive_phase4_toward_last_candidate():
+                return
+            self._begin_phase4_observation("observe", snapshot, now)
+            return
+
+        drive_started = getattr(self, "phase4_search_drive_started_at", now)
+        if state != "drive":
+            self.phase4_search_state = "drive"
+            self.phase4_search_drive_started_at = now
+            drive_started = now
+        if now - float(drive_started) >= float(PHASE4_SEARCH_SWEEP_INTERVAL):
+            self._begin_phase4_observation("observe", snapshot, now)
+            return
+
+        # Preserve the established counter-clockwise circular search.
+        self.phase4_search_state = "drive"
         self._set_forward_pivot_turn(
-            turn_side,
-            PHASE4_ALIGN_PIVOT_SPEED,
-            cmd_type="phase4_camera_align_arc",
-            speed_inner=PHASE4_ALIGN_INNER_SPEED,
+            "left",
+            PHASE4_SEARCH_OUTER_SPEED,
+            cmd_type="phase4_search_arc",
+            speed_inner=PHASE4_SEARCH_INNER_SPEED,
             ramp_time=PHASE4_MOTOR_RAMP_TIME,
         )
 
     def _drive_phase5_camera(self, snapshot):
         """Apply one production Phase5 visual-approach motor decision."""
+        if not self._camera_observation_fresh(snapshot):
+            self.stop_motors()
+            return
         cone_seen = self._phase45_cone_seen(
             snapshot,
             CONE_PROBABILITY_THRESHOLD_PHASE5,
@@ -569,6 +764,9 @@ class MotorManager:
             cone_direction,
             cone_seen,
         )
+        if not cone_seen:
+            self.stop_motors()
+            return
         steer_direction = (
             filtered_direction
             if filtered_direction is not None
@@ -636,6 +834,8 @@ class MotorManager:
                 if last_phase != phase:
                     if phase not in (Phase.PHASE4, Phase.PHASE5) or last_phase not in (Phase.PHASE4, Phase.PHASE5):
                         self._reset_phase45_camera_track()
+                    if phase == Phase.PHASE4:
+                        self._reset_phase4_search_cycle()
                     self._motor_last_phase = phase
 
                 if phase in PHASES_STOP_MOTORS:

@@ -7,6 +7,7 @@ import threading
 
 from mission.const import (
     CAMERA_CONTROL_INVERT_X,
+    CAMERA_FRAME_STALE_STOP_SEC,
     DEFAULT_BNO_CALIB,
     DEFAULT_VECTOR3,
     DEVICE_KEYS,
@@ -210,6 +211,11 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase3_arrived_latched = False
         self.phase4_detect_confirm_count = 0
         self.phase4_detect_confirm_marker = None
+        self.phase4_last_processed_cone_seq = 0
+        self.phase4_weak_confirm_count = 0
+        self.phase4_weak_confirm_marker = None
+        self.phase4_weak_missed_frames = 0
+        self.phase5_last_processed_cone_seq = 0
         self.cone_phase_decision = "not_evaluated"
         self.cone_phase_threshold = 0.0
         self.cone_phase_reached_probability_threshold = 0.0
@@ -300,6 +306,8 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             return "PHASE4_TIMEOUT_GIVE_UP"
         if reason == "PHASE4_CAMERA_DEAD_GIVE_UP":
             return "PHASE4_CAMERA_DEAD_GIVE_UP"
+        if reason == "PHASE5_CAMERA_STALE_GIVE_UP":
+            return "PHASE5_CAMERA_STALE_GIVE_UP"
         return "OTHER_ABNORMAL_EXIT"
 
     def _write_final_log_row(self):
@@ -339,8 +347,13 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             self.searching_flag = False
             self.phase4_detect_confirm_count = 0
             self.phase4_detect_confirm_marker = None
+            self.phase4_last_processed_cone_seq = 0
+            self.phase4_weak_confirm_count = 0
+            self.phase4_weak_confirm_marker = None
+            self.phase4_weak_missed_frames = 0
         elif phase_enum == Phase.PHASE5:
             self.time_phase5_start = now
+            self.phase5_last_processed_cone_seq = 0
 
     def _sync_phase_time_tracking(self, current_phase):
         now = time.time()
@@ -409,14 +422,36 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
                         "Phase2 timeout: forcing Phase3 in GPS-only mode "
                         f"(unverified candidate={fallback_offset:.1f} deg)"
                     )
+        phase5_camera_stale = False
+        if current_phase == Phase.PHASE5 and next_phase == Phase.PHASE6:
+            camera_snapshot = self.st.snapshot()
+            try:
+                updated_at = float(camera_snapshot.get("cone_updated_at", 0.0))
+            except (TypeError, ValueError):
+                updated_at = 0.0
+            try:
+                camera_sequence = int(camera_snapshot.get("cone_sequence", 0))
+            except (TypeError, ValueError):
+                camera_sequence = 0
+            camera_age = float("inf") if updated_at <= 0.0 else max(0.0, now - updated_at)
+            phase5_camera_stale = not bool(
+                camera_snapshot.get("cone_valid", False)
+                and camera_sequence > 0
+                and camera_age <= float(CAMERA_FRAME_STALE_STOP_SEC)
+            )
+        timeout_target = Phase.PHASE7 if phase5_camera_stale else next_phase
         print(
             f"{current_phase.name} cumulative timeout ({phase_elapsed:.1f}s / {phase_budget:.1f}s): "
-            f"forcing {next_phase.name}"
+            f"forcing {timeout_target.name}"
         )
         self._commit_active_phase_elapsed(current_phase, now)
         if current_phase == Phase.PHASE4:
             self.cone_phase_decision = "p4_cumulative_timeout_to_p7_give_up"
             self.transition_to_give_up("PHASE4_TIMEOUT_GIVE_UP")
+            return True
+        if phase5_camera_stale:
+            self.cone_phase_decision = "p5_camera_stale_to_p7_give_up"
+            self.transition_to_give_up("PHASE5_CAMERA_STALE_GIVE_UP")
             return True
         if next_phase == Phase.PHASE6 and self.mission_end_reason == "RUNNING":
             self.mission_end_reason = f"{current_phase.name}_CUM_TIMEOUT_TO_PHASE6"

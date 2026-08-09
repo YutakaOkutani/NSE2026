@@ -61,6 +61,12 @@ class detector:
         self.strict_red_min_sv_score = 0.28
         self.strict_red_min_shape_score = 0.32
         self.strict_red_min_prob = 0.18
+        self.relaxed_red_min_hue_score = 0.45
+        self.relaxed_red_min_sv_score = 0.20
+        # Keep relaxed candidates below both Phase4 (0.20) and Phase5 (0.18)
+        # drive thresholds; temporal confirmation promotes them separately.
+        self.relaxed_red_probability_cap = 0.17
+        self.small_lower_probability_cap = 0.24
 
         # Default red HSV ranges (OpenCV H: 0-179)
         self.default_hsv_ranges = [
@@ -234,6 +240,8 @@ class detector:
 
             self.picam2 = Picamera2()
             config = self.picam2.create_preview_configuration(
+                # Picamera2/libcamera names formats by packed word order.  For
+                # OpenCV B,G,R array order the documented format is RGB888.
                 main={"size": (self.camera_width, self.camera_height), "format": "RGB888"}
             )
             self.picam2.configure(config)
@@ -270,7 +278,9 @@ class detector:
                 self.last_capture_error = None
                 # Standardize detector input orientation for this vehicle build (camera is mounted upside down).
                 raw = cv2.rotate(raw, cv2.ROTATE_180)
-                return cv2.blur(raw, (8, 8))
+                # Red-mask preprocessing already applies a 3x3 Gaussian blur.
+                # An additional 8x8 box blur erased narrow distant cones.
+                return raw
             except Exception as exc:
                 last_exc = exc
                 print(f"[Detector] Capture Error (attempt {attempt + 1}/{self.capture_retry_count}): {exc}")
@@ -829,6 +839,33 @@ class detector:
             return "wide_without_roi_support"
         return ""
 
+    def __relaxed_red_candidate_ok(self, component, reject_reason):
+        """Keep plausible outdoor red cones as weak temporal candidates."""
+        if component is None:
+            return False
+        hue = float(component.get("hue_redness_score", 0.0))
+        sv = float(component.get("sv_score", 0.0))
+        shape = float(component.get("cone_shape_score", 0.0))
+        prob = float(component.get("score", 0.0))
+        if prob < self.strict_red_min_prob or shape < self.strict_red_min_shape_score:
+            return False
+        if reject_reason == "hue_below_min":
+            return hue >= self.relaxed_red_min_hue_score and sv >= self.strict_red_min_sv_score
+        if reject_reason == "sv_below_min":
+            return sv >= self.relaxed_red_min_sv_score and hue >= self.strict_red_min_hue_score
+        return False
+
+    def __relaxed_red_penalty(self, component, reject_reason):
+        hue = float(component.get("hue_redness_score", 0.0))
+        sv = float(component.get("sv_score", 0.0))
+        if reject_reason == "hue_below_min":
+            span = max(self.strict_red_min_hue_score - self.relaxed_red_min_hue_score, 1e-6)
+            ratio = np.clip((hue - self.relaxed_red_min_hue_score) / span, 0.0, 1.0)
+        else:
+            span = max(self.strict_red_min_sv_score - self.relaxed_red_min_sv_score, 1e-6)
+            ratio = np.clip((sv - self.relaxed_red_min_sv_score) / span, 0.0, 1.0)
+        return float(0.52 + 0.36 * ratio)
+
     def __swap_rb_candidate_is_trustworthy(self, candidate):
         if candidate is None:
             return False
@@ -1143,8 +1180,19 @@ class detector:
             )
             strict_red_ok = not strict_red_reject_reason
             if not strict_red_ok:
-                prob *= 0.08
-                penalty_flags.append("strict_red_x0.08")
+                if self.__relaxed_red_candidate_ok(best_component, strict_red_reject_reason):
+                    relaxed_penalty = self.__relaxed_red_penalty(
+                        best_component,
+                        strict_red_reject_reason,
+                    )
+                    prob = min(
+                        prob * relaxed_penalty,
+                        self.relaxed_red_probability_cap,
+                    )
+                    penalty_flags.append(f"strict_red_relaxed_x{relaxed_penalty:.2f}")
+                else:
+                    prob *= 0.08
+                    penalty_flags.append("strict_red_x0.08")
             quality_floor = min(cone_shape_score, hue_redness_score, sv_score)
             if (
                 bbox_bottom_frac < 0.48
@@ -1210,7 +1258,13 @@ class detector:
                 and hue_redness_score >= 0.62
                 and sv_score >= 0.24
             ):
-                prob = max(prob, min(0.78, 0.26 + 0.40 * cone_shape_score + 0.18 * hue_redness_score + 1.8 * occupancy))
+                lower_score = (
+                    0.26
+                    + 0.40 * cone_shape_score
+                    + 0.18 * hue_redness_score
+                    + 1.8 * occupancy
+                )
+                prob = max(prob, min(self.small_lower_probability_cap, lower_score))
                 penalty_flags.append("small_lower_cone_floor")
 
         legacy_prob = 0.0
@@ -1269,6 +1323,10 @@ class detector:
                 prob = legacy_prob
                 is_detected = prob >= self.min_detect_probability
                 penalty_flags.append("legacy_backproj_selected")
+
+        # Internal detection state must describe the final penalized score, not
+        # the pre-filter component score.
+        is_detected = bool(reached or prob >= self.min_detect_probability)
 
         # Candidate quality to resolve RGB/BGR ambiguity across camera setups.
         overall_score = (

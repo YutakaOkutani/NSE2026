@@ -1,7 +1,9 @@
 import sys
 import unittest
 import importlib.util
+import time
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -62,6 +64,20 @@ class _HeadingOnlyController(MotorManager):
 
 
 class Phase3HeadingTest(unittest.TestCase):
+    @staticmethod
+    def _fresh_camera_snapshot(**overrides):
+        snapshot = {
+            "cone_probability": 0.0,
+            "cone_is_reached": False,
+            "cone_direction": 0.5,
+            "cone_valid": True,
+            "cone_sequence": 1,
+            "cone_updated_at": time.time(),
+            "cone_debug": {},
+        }
+        snapshot.update(overrides)
+        return snapshot
+
     def test_phase2_calibration_uses_forward_only_alternating_arcs(self):
         ctrl = _HeadingOnlyController()
 
@@ -94,13 +110,7 @@ class Phase3HeadingTest(unittest.TestCase):
     def test_phase4_search_calls_configured_forward_arc(self):
         ctrl = _HeadingOnlyController()
 
-        ctrl._drive_phase4_camera(
-            {
-                "cone_probability": 0.0,
-                "cone_is_reached": False,
-                "cone_direction": 0.5,
-            }
-        )
+        ctrl._drive_phase4_camera(self._fresh_camera_snapshot())
 
         args, kwargs = ctrl.motor_commands[-1]
         self.assertEqual((args[0], args[2]), (45, 90))
@@ -113,11 +123,10 @@ class Phase3HeadingTest(unittest.TestCase):
         ctrl = _HeadingOnlyController()
 
         ctrl._drive_phase4_camera(
-            {
-                "cone_probability": 0.5,
-                "cone_is_reached": False,
-                "cone_direction": 0.0,
-            }
+            self._fresh_camera_snapshot(
+                cone_probability=0.5,
+                cone_direction=0.0,
+            )
         )
 
         args, kwargs = ctrl.motor_commands[-1]
@@ -131,11 +140,10 @@ class Phase3HeadingTest(unittest.TestCase):
         ctrl = _HeadingOnlyController()
 
         ctrl._drive_phase5_camera(
-            {
-                "cone_probability": 0.5,
-                "cone_is_reached": False,
-                "cone_direction": 0.0,
-            }
+            self._fresh_camera_snapshot(
+                cone_probability=0.5,
+                cone_direction=0.0,
+            )
         )
 
         args, kwargs = ctrl.motor_commands[-1]
@@ -143,6 +151,78 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertTrue(args[1])
         self.assertTrue(args[3])
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_left")
+
+    def test_stale_camera_observation_stops_phase4_motion(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(cone_updated_at=time.time() - 1.0)
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (0.0, 0.0))
+        self.assertEqual(kwargs["cmd_type"], "stop")
+
+    def test_phase4_stop_and_look_requires_three_new_frames_after_settle(self):
+        ctrl = _HeadingOnlyController()
+        ctrl._reset_phase4_search_cycle(100.0)
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.0):
+            ctrl._drive_phase4_camera(
+                self._fresh_camera_snapshot(cone_sequence=1, cone_updated_at=100.0)
+            )
+        self.assertEqual(ctrl.motor_commands[-1][1]["cmd_type"], "phase4_search_arc")
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=102.1):
+            ctrl._drive_phase4_camera(
+                self._fresh_camera_snapshot(cone_sequence=2, cone_updated_at=102.1)
+            )
+        self.assertEqual(ctrl.phase4_search_state, "observe")
+        self.assertEqual(ctrl.motor_commands[-1][1]["cmd_type"], "stop")
+
+        # Settle finishes at 102.35; the frame current at that point becomes
+        # the baseline and is not itself counted as an observed frame.
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=102.4):
+            ctrl._drive_phase4_camera(
+                self._fresh_camera_snapshot(cone_sequence=3, cone_updated_at=102.4)
+            )
+        self.assertEqual(ctrl.phase4_search_state, "observe")
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=102.6):
+            ctrl._drive_phase4_camera(
+                self._fresh_camera_snapshot(cone_sequence=3, cone_updated_at=102.4)
+            )
+        self.assertEqual(ctrl.phase4_search_state, "observe")
+
+        for sequence, now in ((4, 102.7), (5, 102.8), (6, 102.9)):
+            with patch.object(mtr_mgr_under_test.time, "time", return_value=now):
+                ctrl._drive_phase4_camera(
+                    self._fresh_camera_snapshot(
+                        cone_sequence=sequence,
+                        cone_updated_at=now,
+                    )
+                )
+
+        self.assertEqual(ctrl.phase4_search_state, "drive")
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=103.0):
+            ctrl._drive_phase4_camera(
+                self._fresh_camera_snapshot(cone_sequence=6, cone_updated_at=102.9)
+            )
+        self.assertEqual(ctrl.motor_commands[-1][1]["cmd_type"], "phase4_search_arc")
+
+    def test_phase4_reentry_turns_toward_last_phase5_direction(self):
+        ctrl = _HeadingOnlyController()
+        ctrl.phase45_filtered_cone_dir = 0.20
+        ctrl._reset_phase4_search_cycle(100.0)
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.0):
+            ctrl._drive_phase4_camera(
+                self._fresh_camera_snapshot(cone_sequence=1, cone_updated_at=100.0)
+            )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (45, 70))
+        self.assertEqual(kwargs["cmd_type"], "phase4_reacquire_last_candidate")
 
     def test_phase2_offset_hold_steers_back_to_relative_bno_heading(self):
         ctrl = _HeadingOnlyController()

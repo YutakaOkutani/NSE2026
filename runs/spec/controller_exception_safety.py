@@ -137,11 +137,21 @@ class _TimeoutHarness:
         self.cone_phase_decision = "p4_precheck"
         self.terminal_phase = None
         self.motor_stopped = False
+        self.st = types.SimpleNamespace(
+            snapshot=lambda: {
+                "cone_valid": False,
+                "cone_sequence": 0,
+                "cone_updated_at": 0.0,
+            }
+        )
 
     def transition_to_give_up(self, reason):
         self.mission_end_reason = reason
         self.terminal_phase = Phase.PHASE7
         self.motor_stopped = True
+
+    def initialize_phase(self, phase):
+        self.terminal_phase = Phase(phase)
 
 
 class ControllerExceptionSafetyTest(unittest.TestCase):
@@ -160,6 +170,42 @@ class ControllerExceptionSafetyTest(unittest.TestCase):
             harness.cone_phase_decision,
             "p4_cumulative_timeout_to_p7_give_up",
         )
+
+    def test_phase5_stale_camera_timeout_never_forces_blind_final_ram(self):
+        harness = _TimeoutHarness()
+        harness.last_phase_observed = Phase.PHASE5
+        time_module = CanSatController._handle_timeout_transitions.__globals__["time"]
+
+        with patch.object(time_module, "time", return_value=100.0):
+            handled = harness._handle_timeout_transitions(Phase.PHASE5)
+
+        self.assertTrue(handled)
+        self.assertEqual(harness.terminal_phase, Phase.PHASE7)
+        self.assertTrue(harness.motor_stopped)
+        self.assertEqual(harness.mission_end_reason, "PHASE5_CAMERA_STALE_GIVE_UP")
+        self.assertEqual(
+            harness.cone_phase_decision,
+            "p5_camera_stale_to_p7_give_up",
+        )
+
+    def test_phase5_fresh_camera_timeout_preserves_existing_final_ram_transition(self):
+        harness = _TimeoutHarness()
+        harness.last_phase_observed = Phase.PHASE5
+        harness.st = types.SimpleNamespace(
+            snapshot=lambda: {
+                "cone_valid": True,
+                "cone_sequence": 12,
+                "cone_updated_at": 99.8,
+            }
+        )
+        time_module = CanSatController._handle_timeout_transitions.__globals__["time"]
+
+        with patch.object(time_module, "time", return_value=100.0):
+            handled = harness._handle_timeout_transitions(Phase.PHASE5)
+
+        self.assertTrue(handled)
+        self.assertEqual(harness.terminal_phase, Phase.PHASE6)
+        self.assertEqual(harness.mission_end_reason, "PHASE5_CUM_TIMEOUT_TO_PHASE6")
 
     def test_shutdown_stops_workers_and_releases_hardware_before_final_log(self):
         harness = _ShutdownHarness()
