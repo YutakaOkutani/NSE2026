@@ -15,14 +15,6 @@ from mission.const import (
     CAMERA_MIXED_CONFIRM_FRAMES,
     CAMERA_WEAK_CONFIRM_FRAMES,
     CAMERA_WEAK_MAX_MISSED_FRAMES,
-    CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
-    CAMERA_WEAK_MIN_HUE_SCORE,
-    CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT,
-    CAMERA_WEAK_MIN_ROI_SUPPORT,
-    CAMERA_WEAK_MIN_SHAPE_SCORE,
-    CAMERA_WEAK_MIN_SV_SCORE,
-    CAMERA_WEAK_RELAXED_SV_SCORE,
-    CAMERA_WEAK_STRONG_HUE_SCORE,
     CAMERA_TINY_OCCUPANCY_THRESHOLD,
     CONE_CENTER_POSITION,
     CONE_PHASE4_BBOX_CENTER_Y_TOLERANCE,
@@ -42,6 +34,7 @@ from mission.const import (
     Phase,
     TIMEOUT_PHASE_4,
 )
+from mission.cone_candidate import evaluate_cone_candidate
 from mission.nav import calc_distance_and_azimuth
 from mission.phases.base import BasePhaseHandler
 
@@ -63,52 +56,6 @@ class Phase4Handler(BasePhaseHandler):
             and sequence > 0
             and age <= float(CAMERA_FRAME_STALE_STOP_SEC)
         ), sequence, age
-
-    def _weak_candidate(self, snapshot, cone_dir):
-        debug = dict(snapshot.get("cone_debug", {}) or {})
-        candidate_prob = self._float_value(debug.get("candidate_probability", 0.0))
-        shape = self._float_value(debug.get("cone_shape_score", 0.0))
-        hue = self._float_value(debug.get("hue_redness_score", 0.0))
-        sv = self._float_value(debug.get("sv_score", 0.0))
-        roi_support = self._float_value(debug.get("roi_support_ratio", 0.0))
-        roi_absolute_support = self._float_value(
-            debug.get("roi_absolute_support", 0.0)
-        )
-        occupancy = self._float_value(debug.get("occupancy", 0.0))
-        ground_penalty = self._float_value(debug.get("ground_penalty", 1.0), 1.0)
-        bbox_height = self._float_value(debug.get("bbox_height", 0.0))
-        bbox_bottom = self._float_value(debug.get("bbox_bottom_frac", 0.0))
-        penalty_flags = str(debug.get("penalty_flags", ""))
-        centered = abs(cone_dir - CONE_CENTER_POSITION) <= CONE_PHASE4_CENTER_TOLERANCE
-        color_quality = (
-            hue >= CAMERA_WEAK_MIN_HUE_SCORE and sv >= CAMERA_WEAK_MIN_SV_SCORE
-        ) or (
-            hue >= CAMERA_WEAK_STRONG_HUE_SCORE
-            and sv >= CAMERA_WEAK_RELAXED_SV_SCORE
-        )
-        reference_quality = (
-            roi_support >= CAMERA_WEAK_MIN_ROI_SUPPORT
-            or (
-                hue >= CAMERA_WEAK_STRONG_HUE_SCORE
-                and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE + 0.10
-            )
-        )
-        tiny = 0.0 < occupancy < float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
-        return bool(
-            centered
-            and candidate_prob >= CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY
-            and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE
-            and color_quality
-            and reference_quality
-            and (
-                not tiny
-                or roi_absolute_support
-                >= CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT
-            )
-            and ground_penalty >= 0.5
-            and "upper_sky" not in penalty_flags
-            and (bbox_height <= 0.0 or bbox_bottom >= 0.35)
-        )
 
     @staticmethod
     def _angle_diff_deg(target, current):
@@ -423,21 +370,10 @@ class Phase4Handler(BasePhaseHandler):
         except (TypeError, ValueError):
             cone_dir_val = CONE_CENTER_POSITION
         centered = abs(cone_dir_val - CONE_CENTER_POSITION) <= CONE_PHASE4_CENTER_TOLERANCE
-        cone_debug = dict(current_snapshot.get("cone_debug", {}) or {})
-        strict_red_ok = bool(int(self._float_value(cone_debug.get("strict_red_ok", 0))))
-        occupancy = self._float_value(cone_debug.get("occupancy", 0.0))
-        credible_single_frame_size = bool(
-            occupancy <= 0.0
-            or occupancy >= float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
-        )
-        strict_detect = (
-            cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE4
-            and centered
-            and strict_red_ok
-            and credible_single_frame_size
-        )
+        evidence = evaluate_cone_candidate(current_snapshot)
+        strict_detect = bool(centered and evidence["strict"])
         loose_detect = cone_prob > CONE_PROBABILITY_THRESHOLD
-        weak_detect = self._weak_candidate(current_snapshot, cone_dir_val)
+        weak_detect = bool(centered and evidence["weak"])
         signature = self._candidate_signature(current_snapshot, cone_dir_val)
         candidate_detect = bool(cone_reached_effective or strict_detect or weak_detect)
         consistent, consistency_reason = self._candidate_consistency(

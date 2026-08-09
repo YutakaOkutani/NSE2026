@@ -17,6 +17,7 @@ MotorManager = mtr_mgr_under_test.MotorManager
 
 
 from mission.const import PHASE4_SEARCH_OUTER_SPEED
+from mission.motor_map import map_logical_wheels_to_physical
 
 class _HeadingOnlyController(MotorManager):
     def __init__(self):
@@ -196,7 +197,7 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertEqual((args[0], args[2]), (60, 45))
         self.assertEqual(kwargs["cmd_type"], "phase4_candidate_capture_arc")
 
-    def test_phase4_centered_single_candidate_does_not_drive_toward_it(self):
+    def test_phase4_centered_single_candidate_moves_straight_without_rotation(self):
         ctrl = _HeadingOnlyController()
 
         ctrl._drive_phase4_camera(
@@ -208,10 +209,111 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 60))
+        self.assertEqual((args[0], args[2]), (45, 45))
         self.assertTrue(args[1])
         self.assertTrue(args[3])
+        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_observe_forward")
+
+    def test_phase4_near_center_candidate_uses_proportional_right_steering(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.5,
+                cone_direction=0.58,
+                cone_debug={"strict_red_ok": 1},
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertGreater(args[0], args[2])
+        self.assertLess(args[0], 60)
+        self.assertEqual(args[2], 45)
         self.assertEqual(kwargs["cmd_type"], "phase4_candidate_observe_arc")
+
+        physical = map_logical_wheels_to_physical(
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+        )
+        # Physical MTR2 is the left wheel and must be faster for a right turn.
+        self.assertGreater(physical[2], physical[0])
+
+    def test_phase4_image_left_steers_physical_right_wheel_faster(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.5,
+                cone_direction=0.2,
+                cone_debug={"strict_red_ok": 1},
+            )
+        )
+
+        args, _kwargs = ctrl.motor_commands[-1]
+        physical = map_logical_wheels_to_physical(
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+        )
+        # Physical MTR1 is the right wheel and must be faster for a left turn.
+        self.assertGreater(physical[0], physical[2])
+
+    def test_phase4_roi_supported_weak_candidate_starts_center_hold(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.17,
+                cone_direction=0.5,
+                cone_debug={
+                    "strict_red_ok": 0,
+                    "occupancy": 0.20,
+                    "candidate_probability": 0.53,
+                    "cone_shape_score": 0.48,
+                    "hue_redness_score": 0.52,
+                    "sv_score": 0.97,
+                    "roi_support_ratio": 0.20,
+                    "roi_absolute_support": 0.025,
+                    "bbox_height": 350,
+                    "bbox_height_frac": 350 / 480,
+                    "bbox_bottom_frac": 0.73,
+                },
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (45, 45))
+        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_observe_forward")
+
+    def test_phase4_low_probability_candidate_without_roi_keeps_searching(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.194,
+                cone_direction=0.48,
+                cone_debug={
+                    "strict_red_ok": 1,
+                    "occupancy": 0.004,
+                    "candidate_probability": 0.35,
+                    "cone_shape_score": 0.73,
+                    "hue_redness_score": 0.70,
+                    "sv_score": 0.53,
+                    "roi_support_ratio": 0.0,
+                    "roi_absolute_support": 0.0,
+                    "bbox_height": 105,
+                    "bbox_height_frac": 105 / 480,
+                    "bbox_bottom_frac": 0.54,
+                },
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (45, int(PHASE4_SEARCH_OUTER_SPEED)))
+        self.assertEqual(kwargs["cmd_type"], "phase4_search_arc")
 
     def test_phase4_loss_rechecks_last_direction_then_resumes_search(self):
         ctrl = _HeadingOnlyController()
@@ -315,6 +417,69 @@ class Phase3HeadingTest(unittest.TestCase):
         args, kwargs = ctrl.motor_commands[-1]
         self.assertEqual((args[0], args[2]), (100.0, 58.0))
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_right")
+
+    def test_phase5_roi_supported_weak_candidate_remains_trackable(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase5_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.17,
+                cone_direction=0.5,
+                cone_debug={
+                    "strict_red_ok": 0,
+                    "occupancy": 0.20,
+                    "candidate_probability": 0.53,
+                    "cone_shape_score": 0.48,
+                    "hue_redness_score": 0.52,
+                    "sv_score": 0.97,
+                    "roi_support_ratio": 0.20,
+                    "roi_absolute_support": 0.025,
+                    "bbox_height": 350,
+                    "bbox_height_frac": 350 / 480,
+                    "bbox_bottom_frac": 0.73,
+                },
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (80, 80))
+        self.assertEqual(kwargs["cmd_type"], "phase5_approach_forward")
+
+    def test_phase5_brief_loss_keeps_turning_toward_last_image_direction(self):
+        ctrl = _HeadingOnlyController()
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.0):
+            ctrl._drive_phase5_camera(
+                self._fresh_camera_snapshot(
+                    cone_sequence=1,
+                    cone_updated_at=100.0,
+                    cone_probability=0.5,
+                    cone_direction=0.9,
+                )
+            )
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.2):
+            ctrl._drive_phase5_camera(
+                self._fresh_camera_snapshot(
+                    cone_sequence=2,
+                    cone_updated_at=100.2,
+                )
+            )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertGreater(args[0], args[2])
+        self.assertEqual(kwargs["cmd_type"], "phase5_reacquire_right")
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=101.0):
+            ctrl._drive_phase5_camera(
+                self._fresh_camera_snapshot(
+                    cone_sequence=3,
+                    cone_updated_at=101.0,
+                )
+            )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (0.0, 0.0))
+        self.assertEqual(kwargs["cmd_type"], "stop")
 
     def test_stale_camera_observation_stops_phase4_motion(self):
         ctrl = _HeadingOnlyController()

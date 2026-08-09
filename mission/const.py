@@ -241,6 +241,12 @@ APPROACH_TURN_GAIN = 52
 PHASE5_BASE_SPEED = 80
 PHASE5_TURN_CLAMP = 22
 PHASE5_STEER_DEADBAND = 0.03
+# Keep steering briefly toward the last reliable image position when one or
+# two frames are lost.  Stopping immediately leaves the camera looking away
+# from a cone that crossed the image edge during the P4 -> P5 handoff.
+PHASE5_REACQUIRE_GRACE_SEC = 0.75
+PHASE5_REACQUIRE_OUTER_SPEED = 60
+PHASE5_REACQUIRE_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
 PHASE45_CONE_DIR_FILTER_ALPHA = 0.72
 PHASE4_MOTOR_RAMP_TIME = 0.06
 PHASE5_MOTOR_RAMP_TIME = 0.05

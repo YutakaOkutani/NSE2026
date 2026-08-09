@@ -26,6 +26,7 @@ from mission.const import (
     Phase,
     TIMEOUT_PHASE_5,
 )
+from mission.cone_candidate import evaluate_cone_candidate
 from mission.nav import calc_distance_and_azimuth
 from mission.phases.base import BasePhaseHandler
 
@@ -130,6 +131,7 @@ class Phase5Handler(BasePhaseHandler):
         cone_prob = current_snapshot["cone_probability"]
         now = time.time()
         camera_fresh, cone_sequence = self._fresh_camera_frame(current_snapshot, now)
+        evidence = evaluate_cone_candidate(current_snapshot)
         is_reach_effective = camera_fresh and bool(is_reach) and (
             cone_prob
             > max(
@@ -137,7 +139,15 @@ class Phase5Handler(BasePhaseHandler):
                 CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
             )
         )
-        is_det = (cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE5) or is_reach_effective
+        weak_detect = bool(camera_fresh and evidence["weak"])
+        is_det = (
+            camera_fresh
+            and (
+                cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE5
+                or weak_detect
+                or is_reach_effective
+            )
+        )
         controller.cone_phase_detected = bool(is_det)
         controller.cone_phase_reached_effective = bool(is_reach_effective)
         camera_dead = (
@@ -171,7 +181,9 @@ class Phase5Handler(BasePhaseHandler):
             if cone_prob > CONE_PROBABILITY_THRESHOLD and controller.led_blink_timer % 10 == 0:
                 print(f"Phase5: weak visual ignored (prob={cone_prob:.2f})")
         else:
-            controller.cone_phase_decision = "p5_tracking"
+            controller.cone_phase_decision = (
+                "p5_tracking_weak" if weak_detect else "p5_tracking"
+            )
             controller.count_cone_lost = 0
 
         if controller.count_cone_lost >= CONE_LOST_COUNT_LIMIT:

@@ -448,6 +448,104 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
         self.assertEqual(ctrl.cone_phase_decision, "p4_confirmed_to_p5")
 
+    def test_phase4_handheld_centered_cone_transitions_after_three_frames(self):
+        """Regression for the stationary cone visible in log frames 146-152."""
+        ctrl = _VisionController(Phase.PHASE4)
+        debug = {
+            "strict_red_ok": 0,
+            "candidate_probability": 0.53,
+            "cone_shape_score": 0.48,
+            "hue_redness_score": 0.52,
+            "sv_score": 0.97,
+            "roi_support_ratio": 0.20,
+            "roi_absolute_support": 0.025,
+            "occupancy": 0.20,
+            "bbox_x": 185,
+            "bbox_y": 0,
+            "bbox_width": 270,
+            "bbox_height": 350,
+            "bbox_width_frac": 270 / 640,
+            "bbox_height_frac": 350 / 480,
+            "bbox_bottom_frac": 0.73,
+        }
+
+        for idx in range(3):
+            now = 100.0 + idx * 0.2
+            ctrl.update_cone_frame(
+                direction=0.5,
+                probability=0.17,
+                observation_time=now,
+                debug=debug,
+            )
+            with patch("mission.phases.p4.time.time", return_value=now):
+                Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
+        self.assertEqual(ctrl.cone_phase_decision, "p4_weak_confirmed_to_p5")
+
+    def test_phase5_keeps_roi_supported_relaxed_cone_in_tracking(self):
+        ctrl = _VisionController(Phase.PHASE5)
+        ctrl.update_cone_frame(
+            direction=0.5,
+            probability=0.17,
+            debug={
+                "strict_red_ok": 0,
+                "candidate_probability": 0.53,
+                "cone_shape_score": 0.48,
+                "hue_redness_score": 0.52,
+                "sv_score": 0.97,
+                "roi_support_ratio": 0.20,
+                "roi_absolute_support": 0.025,
+                "occupancy": 0.20,
+                "bbox_height": 350,
+                "bbox_height_frac": 350 / 480,
+                "bbox_bottom_frac": 0.73,
+            },
+        )
+
+        with patch("mission.phases.p5.time.time", return_value=100.0):
+            Phase5Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
+        self.assertEqual(ctrl.count_cone_lost, 0)
+        self.assertTrue(ctrl.cone_phase_detected)
+        self.assertEqual(ctrl.cone_phase_decision, "p5_tracking_weak")
+
+    def test_phase4_rejects_night_light_track_without_roi_support(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        debug = {
+            "strict_red_ok": 1,
+            "candidate_probability": 0.35,
+            "cone_shape_score": 0.73,
+            "hue_redness_score": 0.70,
+            "sv_score": 0.53,
+            "roi_support_ratio": 0.0,
+            "roi_absolute_support": 0.0,
+            "occupancy": 0.004,
+            "bbox_x": 290,
+            "bbox_y": 155,
+            "bbox_width": 28,
+            "bbox_height": 105,
+            "bbox_width_frac": 28 / 640,
+            "bbox_height_frac": 105 / 480,
+            "bbox_bottom_frac": 0.54,
+        }
+
+        for idx in range(3):
+            now = 100.0 + idx * 0.2
+            ctrl.update_cone_frame(
+                direction=0.48,
+                probability=0.194,
+                observation_time=now,
+                debug=debug,
+            )
+            with patch("mission.phases.p4.time.time", return_value=now):
+                Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE4))
+        self.assertEqual(ctrl.phase4_detect_confirm_count, 0)
+        self.assertFalse(ctrl.cone_phase_detected)
+
 
 if __name__ == "__main__":
     unittest.main()

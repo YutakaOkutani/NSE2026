@@ -5,17 +5,9 @@ from mission.const import (
     APPROACH_TURN_GAIN,
     BASE_SPEED,
     CAMERA_FRAME_STALE_STOP_SEC,
-    CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
-    CAMERA_WEAK_MIN_HUE_SCORE,
-    CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT,
-    CAMERA_WEAK_MIN_ROI_SUPPORT,
-    CAMERA_WEAK_MIN_SHAPE_SCORE,
-    CAMERA_WEAK_MIN_SV_SCORE,
     CONE_CENTER_POSITION,
     CAMERA_TINY_MIN_CONSISTENT_FRAMES,
     CAMERA_TINY_OCCUPANCY_THRESHOLD,
-    CONE_PROBABILITY_THRESHOLD,
-    CONE_PROBABILITY_THRESHOLD_PHASE4,
     CONE_PROBABILITY_THRESHOLD_PHASE5,
     DEVICE_MOTOR_1_DIR,
     DEVICE_MOTOR_1_PWM,
@@ -52,10 +44,16 @@ from mission.const import (
     PHASE4_CANDIDATE_TRACK_CONFIRM_FRAMES,
     PHASE4_MOTOR_RAMP_TIME,
     PHASE4_REACQUIRE_TURN_SEC,
+    PHASE4_TRACK_MIN_ROTATE_SPEED,
+    PHASE4_TRACK_ROTATE_CLAMP,
+    PHASE4_TRACK_ROTATE_GAIN,
     PHASE45_CONE_DIR_FILTER_ALPHA,
     PHASE45_MOTOR_LOOP_INTERVAL,
     PHASE5_BASE_SPEED,
     PHASE5_MOTOR_RAMP_TIME,
+    PHASE5_REACQUIRE_GRACE_SEC,
+    PHASE5_REACQUIRE_INNER_SPEED,
+    PHASE5_REACQUIRE_OUTER_SPEED,
     PHASE5_STEER_DEADBAND,
     PHASE5_TURN_CLAMP,
     PHASE2_SPEED,
@@ -113,6 +111,7 @@ from mission.const import (
     TURN_GAIN_SCALE_MIN,
     Phase,
 )
+from mission.cone_candidate import evaluate_cone_candidate
 from mission.motor_map import (
     forward_to_dir_value,
     get_manual_drive_pattern,
@@ -557,8 +556,8 @@ class MotorManager:
         )
         return True
 
-    def _drive_phase4_candidate_capture(self):
-        """Slowly hold a candidate in view without the pitch caused by 0/0."""
+    def _drive_phase4_candidate_capture(self, command_prefix="phase4_candidate_capture"):
+        """Move forward while proportionally steering a candidate to center."""
         last_dir = getattr(self, "phase4_last_candidate_dir", None)
         try:
             error = float(last_dir) - CONE_CENTER_POSITION
@@ -571,57 +570,43 @@ class MotorManager:
                 PHASE4_CANDIDATE_INNER_SPEED,
                 True,
                 ramp_time=PHASE4_MOTOR_RAMP_TIME,
-                cmd_type="phase4_candidate_capture_forward",
+                cmd_type=f"{command_prefix}_forward",
             )
             return True
+        turn_delta = min(
+            float(PHASE4_TRACK_ROTATE_CLAMP),
+            max(
+                float(PHASE4_TRACK_MIN_ROTATE_SPEED),
+                abs(error) * float(PHASE4_TRACK_ROTATE_GAIN),
+            ),
+            max(
+                0.0,
+                float(PHASE4_CANDIDATE_OUTER_SPEED)
+                - float(PHASE4_CANDIDATE_INNER_SPEED),
+            ),
+        )
+        speed_outer = float(PHASE4_CANDIDATE_INNER_SPEED) + turn_delta
         turn_side = "right" if error > 0.0 else "left"
         self._set_forward_pivot_turn(
             turn_side,
-            PHASE4_CANDIDATE_OUTER_SPEED,
-            cmd_type="phase4_candidate_capture_arc",
+            speed_outer,
+            cmd_type=f"{command_prefix}_arc",
             speed_inner=PHASE4_CANDIDATE_INNER_SPEED,
             ramp_time=PHASE4_MOTOR_RAMP_TIME,
         )
         return True
 
     def _drive_phase4_candidate_observe(self):
-        """Slow the established left search arc without chasing one frame."""
-        self._set_forward_pivot_turn(
-            "left",
-            PHASE4_CANDIDATE_OUTER_SPEED,
-            cmd_type="phase4_candidate_observe_arc",
-            speed_inner=PHASE4_CANDIDATE_INNER_SPEED,
-            ramp_time=PHASE4_MOTOR_RAMP_TIME,
+        """Immediately reduce search rotation and center a credible candidate."""
+        return self._drive_phase4_candidate_capture(
+            command_prefix="phase4_candidate_observe"
         )
 
     def _phase4_motor_candidate(self, snapshot):
-        debug = dict(snapshot.get("cone_debug", {}) or {})
-        probability = self._snapshot_float(snapshot, "cone_probability", 0.0)
-        occupancy = self._snapshot_float(debug, "occupancy", 0.0)
-        strict = bool(int(self._snapshot_float(debug, "strict_red_ok", 0.0))) and (
-            probability > float(CONE_PROBABILITY_THRESHOLD_PHASE4)
-        )
-        weak = bool(
-            self._snapshot_float(debug, "candidate_probability", 0.0)
-            >= CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY
-            and self._snapshot_float(debug, "cone_shape_score", 0.0)
-            >= CAMERA_WEAK_MIN_SHAPE_SCORE
-            and self._snapshot_float(debug, "hue_redness_score", 0.0)
-            >= CAMERA_WEAK_MIN_HUE_SCORE
-            and self._snapshot_float(debug, "sv_score", 0.0)
-            >= CAMERA_WEAK_MIN_SV_SCORE
-            and self._snapshot_float(debug, "roi_support_ratio", 0.0)
-            >= CAMERA_WEAK_MIN_ROI_SUPPORT
-        )
-        if not (strict or weak):
+        evidence = evaluate_cone_candidate(snapshot)
+        if not evidence["candidate"]:
             return None
 
-        tiny = 0.0 < occupancy < float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
-        absolute_roi = self._snapshot_float(debug, "roi_absolute_support", 0.0)
-        # Unknown occupancy is retained for old diagnostics/tests. Production
-        # frames always report it. Tiny candidates require absolute ROI evidence.
-        if tiny and absolute_roi < float(CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT):
-            return None
         direction = self._snapshot_float(
             snapshot,
             "cone_direction",
@@ -629,8 +614,10 @@ class MotorManager:
         )
         return {
             "direction": max(0.0, min(1.0, direction)),
-            "occupancy": occupancy,
-            "tiny": tiny,
+            "occupancy": float(evidence["occupancy"]),
+            "tiny": bool(evidence["tiny"]),
+            "strict": bool(evidence["strict"]),
+            "weak": bool(evidence["weak"]),
         }
 
     @staticmethod
@@ -702,6 +689,9 @@ class MotorManager:
                     )
                 return True
 
+            # A non-tiny candidate is safe enough for one gentle steering
+            # response.  Temporal confirmation is still required before P5.
+            self.phase4_last_candidate_dir = float(candidate["direction"])
             if state not in ("observe", "track"):
                 self.phase4_search_state = "observe"
                 state = "observe"
@@ -750,7 +740,12 @@ class MotorManager:
                 self.phase4_motor_track_count = 0
         return False
 
-    def _update_phase45_filtered_cone_dir(self, raw_cone_direction, cone_seen):
+    def _update_phase45_filtered_cone_dir(
+        self,
+        raw_cone_direction,
+        cone_seen,
+        now=None,
+    ):
         if not cone_seen:
             return getattr(self, "phase45_filtered_cone_dir", None)
         try:
@@ -765,7 +760,7 @@ class MotorManager:
             alpha = PHASE45_CONE_DIR_FILTER_ALPHA
             filtered = (1.0 - alpha) * float(prev) + alpha * cdir
         self.phase45_filtered_cone_dir = filtered
-        self.phase45_last_seen_time = time.time()
+        self.phase45_last_seen_time = time.time() if now is None else float(now)
         return filtered
 
     @staticmethod
@@ -774,7 +769,40 @@ class MotorManager:
             cone_probability = float(snapshot.get("cone_probability", 0.0))
         except (TypeError, ValueError):
             cone_probability = 0.0
-        return bool(snapshot.get("cone_is_reached", False)) or cone_probability > float(threshold)
+        evidence = evaluate_cone_candidate(snapshot)
+        return bool(
+            snapshot.get("cone_is_reached", False)
+            or cone_probability > float(threshold)
+            or evidence["weak"]
+        )
+
+    def _drive_phase5_reacquire(self, now):
+        """Continue a gentle corrective arc across a short detection gap."""
+        last_seen = getattr(self, "phase45_last_seen_time", None)
+        last_dir = getattr(self, "phase45_filtered_cone_dir", None)
+        if last_seen is None or last_dir is None:
+            self.stop_motors()
+            return False
+        if float(now) - float(last_seen) > float(PHASE5_REACQUIRE_GRACE_SEC):
+            self.stop_motors()
+            return False
+        try:
+            error = float(last_dir) - CONE_CENTER_POSITION
+        except (TypeError, ValueError):
+            self.stop_motors()
+            return False
+        if abs(error) <= float(PHASE5_STEER_DEADBAND):
+            self.stop_motors()
+            return False
+        turn_side = "right" if error > 0.0 else "left"
+        self._set_forward_pivot_turn(
+            turn_side,
+            PHASE5_REACQUIRE_OUTER_SPEED,
+            cmd_type=f"phase5_reacquire_{turn_side}",
+            speed_inner=PHASE5_REACQUIRE_INNER_SPEED,
+            ramp_time=PHASE5_MOTOR_RAMP_TIME,
+        )
+        return True
 
     def _drive_phase4_camera(self, snapshot):
         """Apply one production Phase4 search/alignment motor decision."""
@@ -829,7 +857,8 @@ class MotorManager:
 
     def _drive_phase5_camera(self, snapshot):
         """Apply one production Phase5 visual-approach motor decision."""
-        if not self._camera_observation_fresh(snapshot):
+        now = time.time()
+        if not self._camera_observation_fresh(snapshot, now):
             self.stop_motors()
             return
         cone_seen = self._phase45_cone_seen(
@@ -840,9 +869,10 @@ class MotorManager:
         filtered_direction = self._update_phase45_filtered_cone_dir(
             cone_direction,
             cone_seen,
+            now=now,
         )
         if not cone_seen:
-            self.stop_motors()
+            self._drive_phase5_reacquire(now)
             return
         steer_direction = (
             filtered_direction
