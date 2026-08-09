@@ -1,4 +1,5 @@
 # encoding: utf-8
+import os
 import time
 
 import cv2
@@ -37,6 +38,10 @@ class detector:
         self.debug_method = "init"
         self.debug_scores = {}
         self.capture_reached_path = "./log/capture_reached.png"
+        self.evidence_dir = None
+        self.evidence_interval_sec = 2.0
+        self._last_evidence_save_at = 0.0
+        self._evidence_sequence = 0
 
         # Camera
         self.picam2 = None
@@ -46,7 +51,11 @@ class detector:
         self.capture_retry_count = 3
         self.capture_retry_sleep = 0.2
         self.last_capture_error = None
-        self.backproj_dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+        self.roi_backproj_scale = 0.5
+        self.backproj_dilate_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (7, 7),
+        )
 
         # ROI histogram (None = default red mode)
         self.__roi_hist = None
@@ -266,6 +275,50 @@ class detector:
                 pass
             self.picam2 = None
 
+    def set_evidence_dir(self, path):
+        self.evidence_dir = str(path) if path else None
+        if self.evidence_dir:
+            os.makedirs(self.evidence_dir, exist_ok=True)
+
+    def __save_periodic_evidence(self):
+        if not self.evidence_dir or self.input_img is None:
+            return
+        now = time.monotonic()
+        if now - self._last_evidence_save_at < float(self.evidence_interval_sec):
+            return
+        self._last_evidence_save_at = now
+        self._evidence_sequence += 1
+        stem = f"frame_{self._evidence_sequence:04d}_p{self.probability:.3f}"
+        try:
+            annotated = self.input_img.copy()
+            if self.detected is not None and len(self.detected) >= 4:
+                x, y, width, height = (int(value) for value in self.detected[:4])
+                cv2.rectangle(
+                    annotated,
+                    (x, y),
+                    (x + width, y + height),
+                    (0, 255, 255),
+                    2,
+                )
+            cv2.imwrite(
+                os.path.join(self.evidence_dir, stem + "_input.jpg"),
+                annotated,
+                [int(cv2.IMWRITE_JPEG_QUALITY), 88],
+            )
+            if self.binarized_img is not None:
+                cv2.imwrite(
+                    os.path.join(self.evidence_dir, stem + "_mask.png"),
+                    self.binarized_img.astype(np.uint8),
+                )
+            if self.projected_img is not None:
+                cv2.imwrite(
+                    os.path.join(self.evidence_dir, stem + "_roi.jpg"),
+                    self.projected_img.astype(np.uint8),
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 88],
+                )
+        except Exception as exc:
+            print(f"[Detector] Evidence save failed: {exc}")
+
     def __get_camera_img(self):
         if self.picam2 is None and not self.__init_camera():
             self.last_capture_error = "camera init failed"
@@ -368,14 +421,35 @@ class detector:
     def __back_projection_mask(self, hsv_img):
         if self.__roi_hist is None:
             return None, None
-        proj_pos = cv2.calcBackProject([hsv_img], [0, 1], self.__roi_hist, [0, 180, 0, 256], 1).astype(np.float32)
+        scale = max(0.25, min(float(self.roi_backproj_scale), 1.0))
+        if scale < 1.0:
+            work_hsv = cv2.resize(
+                hsv_img,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_AREA,
+            )
+        else:
+            work_hsv = hsv_img
+        proj_pos = cv2.calcBackProject(
+            [work_hsv],
+            [0, 1],
+            self.__roi_hist,
+            [0, 180, 0, 256],
+            1,
+        ).astype(np.float32)
         proj = proj_pos
         if self.__roi_hist_negative is not None:
             proj_neg = cv2.calcBackProject(
-                [hsv_img], [0, 1], self.__roi_hist_negative, [0, 180, 0, 256], 1
+                [work_hsv],
+                [0, 1],
+                self.__roi_hist_negative,
+                [0, 180, 0, 256],
+                1,
             ).astype(np.float32)
             proj = cv2.max(proj_pos - (self.negative_backproj_scale * proj_neg), 0.0)
-        proj = cv2.GaussianBlur(proj, (9, 9), 0)
+        proj = cv2.GaussianBlur(proj, (5, 5), 0)
         proj_u8 = cv2.normalize(proj, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
         # If ROI backprojection is too weak, inject a conservative hue prior.
@@ -383,7 +457,7 @@ class detector:
         if p99 < 30.0:
             hue_prior = None
             for lo, hi in self.default_hsv_ranges:
-                part = cv2.inRange(hsv_img, lo, hi)
+                part = cv2.inRange(work_hsv, lo, hi)
                 hue_prior = part if hue_prior is None else cv2.bitwise_or(hue_prior, part)
             if hue_prior is not None:
                 hue_prior = cv2.GaussianBlur(hue_prior, (7, 7), 0)
@@ -391,7 +465,65 @@ class detector:
 
         _, bp_bin = cv2.threshold(proj_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         bp_bin = cv2.morphologyEx(bp_bin, cv2.MORPH_DILATE, self.backproj_dilate_kernel)
+        if work_hsv is not hsv_img:
+            output_size = (int(hsv_img.shape[1]), int(hsv_img.shape[0]))
+            proj_u8 = cv2.resize(
+                proj_u8,
+                output_size,
+                interpolation=cv2.INTER_LINEAR,
+            )
+            bp_bin = cv2.resize(
+                bp_bin,
+                output_size,
+                interpolation=cv2.INTER_NEAREST,
+            )
         return proj_u8, bp_bin
+
+    @staticmethod
+    def __bounded_support_ratio(overlap_count, denominator):
+        if int(denominator) <= 0:
+            return 0.0
+        ratio = float(overlap_count) / float(denominator)
+        return float(max(0.0, min(ratio, 1.0)))
+
+    @staticmethod
+    def __component_roi_support(red_mask, bp_mask, component):
+        if red_mask is None or bp_mask is None or component is None:
+            return 0.0
+        bbox = component.get("bbox") or [0, 0, 0, 0]
+        if len(bbox) < 4:
+            return 0.0
+        x, y, width, height = (int(value) for value in bbox[:4])
+        if width <= 0 or height <= 0:
+            return 0.0
+        x0 = max(0, x)
+        y0 = max(0, y)
+        x1 = min(red_mask.shape[1], x + width)
+        y1 = min(red_mask.shape[0], y + height)
+        if x1 <= x0 or y1 <= y0:
+            return 0.0
+        labels = component.get("labels")
+        label_idx = component.get("label_idx")
+        if (
+            labels is not None
+            and label_idx is not None
+            and getattr(labels, "shape", None) == getattr(red_mask, "shape", None)
+        ):
+            red_crop = (
+                (labels[y0:y1, x0:x1] == int(label_idx)).astype(np.uint8)
+                * 255
+            )
+        else:
+            red_crop = red_mask[y0:y1, x0:x1]
+        bp_crop = bp_mask[y0:y1, x0:x1]
+        denominator = int(np.count_nonzero(red_crop))
+        if denominator <= 0:
+            return 0.0
+        overlap = cv2.bitwise_and(red_crop, bp_crop)
+        return detector.__bounded_support_ratio(
+            np.count_nonzero(overlap),
+            denominator,
+        )
 
     def __postprocess_mask(self, mask):
         if mask is None:
@@ -584,16 +716,17 @@ class detector:
             "hue_redness_score": hue_redness_score,
         }
 
-    def __component_metrics(self, mask, hsv_img=None):
+    def __component_metrics(self, mask, hsv_img=None, include_largest=False):
         if mask is None:
-            return None
+            return (None, None) if include_largest else None
         mask_u8 = mask.astype(np.uint8)
         nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_u8)
         if nlabels <= 1:
-            return None
+            return (None, None) if include_largest else None
 
         img_size = float(self.camera_width * self.camera_height)
         best = None
+        largest = None
         for idx in range(1, nlabels):
             s = stats[idx]
             area = float(s[cv2.CC_STAT_AREA])
@@ -712,6 +845,10 @@ class detector:
             item.update(color_metrics)
             if best is None or item["score"] > best["score"]:
                 best = item
+            if largest is None or item["area"] > largest["area"]:
+                largest = item
+        if include_largest:
+            return best, largest
         return best
 
     def __largest_component_metrics(self, mask, hsv_img=None):
@@ -866,6 +1003,38 @@ class detector:
             ratio = np.clip((sv - self.relaxed_red_min_sv_score) / span, 0.0, 1.0)
         return float(0.52 + 0.36 * ratio)
 
+    def __small_lower_rescue(
+        self,
+        prob,
+        *,
+        strict_red_ok,
+        bbox_bottom_frac,
+        occupancy,
+        cone_shape_score,
+        hue_redness_score,
+        sv_score,
+    ):
+        eligible = bool(
+            strict_red_ok
+            and bbox_bottom_frac >= 0.55
+            and occupancy < 0.045
+            and cone_shape_score >= 0.55
+            and hue_redness_score >= 0.62
+            and sv_score >= 0.24
+        )
+        if not eligible:
+            return float(prob), False
+        lower_score = (
+            0.26
+            + 0.40 * cone_shape_score
+            + 0.18 * hue_redness_score
+            + 1.8 * occupancy
+        )
+        return (
+            max(float(prob), min(self.small_lower_probability_cap, lower_score)),
+            True,
+        )
+
     def __swap_rb_candidate_is_trustworthy(self, candidate):
         if candidate is None:
             return False
@@ -932,74 +1101,30 @@ class detector:
         red_mask = self.__postprocess_mask(red_mask_raw)
         bp_mask = self.__postprocess_mask(bp_mask_raw) if bp_mask_raw is not None else None
         roi_support_ratio = 0.0
-        roi_support_mask = None
+        # ROI backprojection validates an HSV-red component; it must not create
+        # a competing component that can displace the visually stable cone.
+        best_mode = "hue"
+        best_mask = red_mask
+        best_component, dominant_red_component = self.__component_metrics(
+            red_mask,
+            hsv_img=hsv,
+            include_largest=True,
+        )
 
-        # Prefer overlap when ROI histogram is available, but fall back gracefully.
-        if bp_mask is not None:
-            overlap = cv2.bitwise_and(red_mask, bp_mask)
-            union = cv2.bitwise_or(red_mask, bp_mask)
-            overlap = self.__postprocess_mask(overlap)
-            union = self.__postprocess_mask(union)
-            roi_support_mask = overlap if overlap is not None else None
-            if roi_support_mask is not None and np.count_nonzero(red_mask) > 0:
-                roi_support_ratio = float(np.count_nonzero(roi_support_mask)) / float(np.count_nonzero(red_mask))
-
-            candidates = [
-                ("hybrid_overlap", overlap),
-                ("hue", red_mask),
-                ("backproj", bp_mask),
-            ]
-        else:
-            candidates = [("hue", red_mask)]
-
-        best_mode = None
-        best_component = None
-        best_mask = None
-        best_mode_score = -1.0
-        legacy_component = None
-        for mode_name, mask in candidates:
-            comp = self.__component_metrics(mask, hsv_img=hsv)
-            comp_score = comp["score"] if comp is not None else 0.0
-            # Slight preference for hue-based masks in close range because shape can collapse.
-            if mode_name.startswith("hue"):
-                comp_score += 0.04
-                if bp_mask is not None:
-                    comp_score += 0.02
-                if comp is not None and (
-                    float(comp.get("hue_redness_score", 0.0)) >= 0.62
-                    and float(comp.get("sv_score", 0.0)) >= 0.30
-                ):
-                    comp_score += 0.10
-                if comp is not None and (
-                    float(comp.get("cone_shape_score", 0.0)) >= 0.48
-                    and float(comp.get("width_frac", 0.0)) <= 0.32
-                ):
-                    comp_score += 0.12
-            elif mode_name.startswith("hybrid_overlap"):
-                comp_score += 0.05
-                if comp is not None and (
-                    float(comp.get("cone_shape_score", 0.0)) >= 0.44
-                    and float(comp.get("width_frac", 0.0)) <= 0.36
-                ):
-                    comp_score += 0.08
-            elif mode_name.startswith("backproj"):
-                comp_score -= 0.10
-                if comp is not None and (
-                    float(comp.get("width_frac", 0.0)) >= 0.42
-                    or float(comp.get("aspect", 0.0)) >= 1.60
-                ):
-                    comp_score -= 0.28
-            if comp_score > best_mode_score:
-                best_mode_score = comp_score
-                best_mode = mode_name
-                best_component = comp
-                best_mask = mask
-            if mode_name == "backproj":
-                legacy_component = self.__largest_component_metrics(mask, hsv_img=hsv)
+        roi_support_ratio = self.__component_roi_support(
+            red_mask,
+            bp_mask,
+            best_component,
+        )
 
         reached, frame_red_occupancy, edge_touch = self.__close_range_reached(red_mask)
-        dominant_red = self.__largest_component_bbox(red_mask)
-        dominant_red_component = self.__component_metrics(red_mask, hsv_img=hsv)
+        dominant_red = None
+        if dominant_red_component is not None:
+            dominant_red = {
+                "bbox": dominant_red_component["bbox"],
+                "centroid": dominant_red_component["centroid"],
+                "area": dominant_red_component["area"],
+            }
 
         prob = 0.0
         centroid = None
@@ -1039,6 +1164,11 @@ class detector:
             dom_shape = float(dominant_red_component.get("cone_shape_score", 0.0)) if dominant_red_component else 0.0
             dom_hue = float(dominant_red_component.get("hue_redness_score", 0.0)) if dominant_red_component else 0.0
             dom_sv = float(dominant_red_component.get("sv_score", 0.0)) if dominant_red_component else 0.0
+            dominant_roi_support = self.__component_roi_support(
+                red_mask,
+                bp_mask,
+                dominant_red_component,
+            )
             dom_ground_penalty = self.__ground_band_penalty(
                 dom_width_frac,
                 dom_height_frac,
@@ -1050,7 +1180,10 @@ class detector:
                 dom_hue >= self.close_region_min_hue
                 and dom_sv >= self.close_region_min_sv
                 and dom_shape >= self.close_region_min_shape
-                and (roi_support_ratio >= self.close_region_min_roi_support or dom_occ >= 0.20)
+                and (
+                    dominant_roi_support >= self.close_region_min_roi_support
+                    or dom_occ >= 0.20
+                )
                 and dom_ground_penalty >= 0.5
             )
             dominant_close = (
@@ -1058,6 +1191,7 @@ class detector:
                 or (frame_red_occupancy >= 0.22 and dom_width_frac >= 0.30 and dom_height_frac >= 0.35)
             )
             if dominant_close and close_region_ok:
+                best_component = dominant_red_component
                 bbox = dom_bbox
                 centroid = dom_centroid
                 occupancy = max(occupancy, dom_occ)
@@ -1066,6 +1200,7 @@ class detector:
                 is_detected = True
                 best_mask = red_mask
                 best_mode = "close_red_region"
+                roi_support_ratio = dominant_roi_support
 
         close_reached_ok = False
         if dominant_red is not None and dominant_red_component is not None:
@@ -1097,7 +1232,7 @@ class detector:
                 and dom_hue >= 0.60
                 and reached_shape_ok
                 and prob >= self.close_reached_min_prob
-                and (roi_support_ratio >= 0.10 or dom_occ >= 0.24)
+                and (dominant_roi_support >= 0.10 or dom_occ >= 0.24)
                 and dom_ground_penalty >= 0.5
             )
             close_reached_failures = []
@@ -1111,7 +1246,7 @@ class detector:
                 close_reached_failures.append("shape_gate_failed")
             if prob < self.close_reached_min_prob:
                 close_reached_failures.append("probability_below_min")
-            if roi_support_ratio < 0.10 and dom_occ < 0.24:
+            if dominant_roi_support < 0.10 and dom_occ < 0.24:
                 close_reached_failures.append("roi_or_occupancy_gate_failed")
             if dom_ground_penalty < 0.5:
                 close_reached_failures.append("ground_band_rejected")
@@ -1121,6 +1256,7 @@ class detector:
             is_detected = True
             prob = 1.0
             if dominant_red is not None:
+                best_component = dominant_red_component
                 bbox = dominant_red["bbox"]
                 centroid = dominant_red["centroid"]
                 cone_dir = float(centroid[0]) / float(self.camera_width)
@@ -1251,78 +1387,19 @@ class detector:
                 ):
                     prob = max(prob, min(0.82, 0.34 + 5.5 * occupancy))
                     penalty_flags.append("backproj_rescue_floor")
-            if (
-                bbox_bottom_frac >= 0.55
-                and occupancy < 0.045
-                and cone_shape_score >= 0.55
-                and hue_redness_score >= 0.62
-                and sv_score >= 0.24
-            ):
-                lower_score = (
-                    0.26
-                    + 0.40 * cone_shape_score
-                    + 0.18 * hue_redness_score
-                    + 1.8 * occupancy
-                )
-                prob = max(prob, min(self.small_lower_probability_cap, lower_score))
+            prob, lower_rescued = self.__small_lower_rescue(
+                prob,
+                strict_red_ok=strict_red_ok,
+                bbox_bottom_frac=bbox_bottom_frac,
+                occupancy=occupancy,
+                cone_shape_score=cone_shape_score,
+                hue_redness_score=hue_redness_score,
+                sv_score=sv_score,
+            )
+            if lower_rescued:
                 penalty_flags.append("small_lower_cone_floor")
 
         legacy_prob = 0.0
-        if legacy_component is not None and bp_mask is not None:
-            legacy_occ = float(legacy_component.get("occupancy", 0.0))
-            legacy_shape = float(legacy_component.get("cone_shape_score", 0.0))
-            legacy_hue = float(legacy_component.get("hue_redness_score", 0.0))
-            legacy_sv = float(legacy_component.get("sv_score", 0.0))
-            legacy_bbox = legacy_component.get("bbox") or [0, 0, 0, 0]
-            legacy_top = int(legacy_bbox[1]) if len(legacy_bbox) >= 2 else 0
-            legacy_h = int(legacy_bbox[3]) if len(legacy_bbox) >= 4 else 0
-            legacy_bottom_frac = float(legacy_top + legacy_h) / float(self.camera_height) if self.camera_height > 0 else 0.0
-            legacy_width_frac = float(legacy_bbox[2]) / float(self.camera_width) if self.camera_width > 0 else 0.0
-            legacy_height_frac = float(legacy_bbox[3]) / float(self.camera_height) if self.camera_height > 0 else 0.0
-            legacy_aspect = float(legacy_component.get("aspect", 0.0))
-            legacy_prob = min(0.88, 0.20 + 7.5 * legacy_occ)
-            if legacy_occ < self.legacy_backproj_min_occupancy:
-                legacy_prob = 0.0
-            if legacy_shape < self.legacy_backproj_min_shape:
-                legacy_prob *= 0.55
-            if legacy_hue < self.legacy_backproj_min_hue:
-                legacy_prob *= 0.45
-            if legacy_sv < self.legacy_backproj_min_sv:
-                legacy_prob *= 0.55
-            if roi_support_ratio < self.legacy_backproj_min_roi_support:
-                legacy_prob *= 0.40
-            if legacy_bottom_frac < 0.42 and legacy_prob < 0.40:
-                legacy_prob *= 0.45
-            legacy_prob *= self.__ground_band_penalty(
-                legacy_width_frac,
-                legacy_height_frac,
-                legacy_bottom_frac,
-                legacy_aspect,
-                legacy_shape,
-            )
-            if legacy_width_frac >= 0.40 or legacy_aspect >= 1.60:
-                legacy_prob *= 0.18
-            if legacy_hue < self.strict_red_min_hue_score or legacy_sv < self.strict_red_min_sv_score:
-                legacy_prob *= 0.05
-
-            if legacy_prob > prob and (
-                legacy_occ >= self.legacy_backproj_min_occupancy
-                and legacy_shape >= self.legacy_backproj_min_shape
-                and legacy_hue >= self.legacy_backproj_min_hue
-                and legacy_sv >= self.legacy_backproj_min_sv
-                and roi_support_ratio >= self.legacy_backproj_min_roi_support
-                and legacy_prob >= self.min_detect_probability
-            ):
-                best_component = legacy_component
-                best_mode = "backproj_legacy"
-                best_mask = bp_mask
-                bbox = legacy_component["bbox"]
-                centroid = legacy_component["centroid"]
-                occupancy = legacy_occ
-                cone_dir = float(centroid[0]) / float(self.camera_width)
-                prob = legacy_prob
-                is_detected = prob >= self.min_detect_probability
-                penalty_flags.append("legacy_backproj_selected")
 
         # Internal detection state must describe the final penalized score, not
         # the pre-filter component score.
@@ -1513,6 +1590,8 @@ class detector:
             "as_is_probability": float(cand1.get("probability", 0.0)),
             "swap_probability": float(cand2.get("probability", 0.0)) if cand2 is not None else 0.0,
         }
+
+        self.__save_periodic_evidence()
 
         if self.is_reached:
             try:

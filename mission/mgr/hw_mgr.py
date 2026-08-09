@@ -210,6 +210,9 @@ class HardwareManager:
             detector.capture_reached_path = str(
                 getattr(self, "capture_reached_path", os.path.join(".", "log", "capture_reached.png"))
             )
+            set_evidence_dir = getattr(detector, "set_evidence_dir", None)
+            if callable(set_evidence_dir):
+                set_evidence_dir(getattr(self, "camera_evidence_dir", None))
             self.devices[DEVICE_DETECTOR] = detector
             print("Camera: OK (Initialized)")
             return True

@@ -39,7 +39,7 @@ Do not bypass this flow in production changes.
 | `mission/phases/base.py`, `p0.py`-`p7.py` | Phase interface, entry state, decisions, transitions, reasons | Device-driver access or replacement workers |
 | `lib/bmp180.py`, `lib/bno055.py` | Low-level sensor adapters | State-machine policy |
 | `lib/cone_detect.py` | Cone detection and reached evidence | Phase transition policy |
-| `lib/roi_capture.py` | Production ROI reference capture tool | Automatic detector tuning |
+| `lib/roi_capture.py` | ROI capture tool (timestamped captures are kept separate from the production reference) | Automatic detector tuning |
 | `analysis/log.py` | Control/debug log analysis | Runtime control |
 | `analysis/explorer.py` | Offline route/environment reconstruction | Authoritative physical map or runtime control |
 | `analysis/log_selector.py` | Input-log selection | Log interpretation policy |

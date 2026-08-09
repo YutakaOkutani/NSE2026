@@ -119,7 +119,11 @@ CONE_PROBABILITY_THRESHOLD_PHASE4 = 0.20
 CONE_PROBABILITY_THRESHOLD_PHASE5 = 0.18
 CONE_PHASE4_CONFIRM_FRAMES = 2
 CONE_PHASE4_CENTER_TOLERANCE = 0.42
-CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE = 0.14
+CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE = 0.22
+CONE_PHASE4_BEARING_CONSISTENCY_TOLERANCE_DEG = 15.0
+CONE_PHASE4_BBOX_CENTER_Y_TOLERANCE = 0.22
+CONE_PHASE4_BBOX_SIZE_RATIO_MAX = 2.40
+CONE_PHASE4_BBOX_VERTICAL_OVERLAP_MIN = 0.10
 CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD = 0.28
 CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD = 0.30
 CONE_PHASE5_REACH_CONFIRM_FRAMES = 8
@@ -156,8 +160,9 @@ CAMERA_FAIL_LIMIT = 5
 CAMERA_DEAD_TIMEOUT = 30.0
 CAMERA_REINIT_MAX_ATTEMPTS = 3
 # Motor control must not depend on the camera thread returning from a blocked
-# capture call.  Any older observation is treated as unavailable immediately.
-CAMERA_FRAME_STALE_STOP_SEC = 0.60
+# capture call.  The ROI-enabled field rate was 1.8 fps (p95 interval 0.72 s),
+# so allow normal processing jitter while still bounding a frozen camera.
+CAMERA_FRAME_STALE_STOP_SEC = 1.20
 # Phase4では再初期化3回に加え、最後の復帰確認のため最低15秒の猶予を持たせる。
 CAMERA_RECOVERY_GRACE_SEC = 15.0
 CAMERA_CONTROL_INVERT_X = False
@@ -168,6 +173,7 @@ CAMERA_TEMPORAL_DIR_JUMP_MAX = 0.18
 CAMERA_TEMPORAL_CONFIRM_FRAMES = 2
 CAMERA_TEMPORAL_HOLD_SEC = 0.35
 CAMERA_TEMPORAL_DIR_FILTER_ALPHA = 0.45
+CAMERA_HORIZONTAL_FOV_DEG = 62.0
 CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY = 0.18
 CAMERA_WEAK_MIN_SHAPE_SCORE = 0.32
 CAMERA_WEAK_MIN_HUE_SCORE = 0.45
@@ -177,16 +183,15 @@ CAMERA_WEAK_RELAXED_SV_SCORE = 0.20
 CAMERA_WEAK_CONFIRM_FRAMES = 4
 CAMERA_WEAK_MAX_MISSED_FRAMES = 1
 
-# ロゴ保存パス
-# ROI画像はホーム配下の固定パスを常に参照する
-ROI_CAPTURE_DIR = "/home/pi/logs_nse2026/roi"
-ROI_PATH_1 = os.path.join(ROI_CAPTURE_DIR, "captured_roi_img.png")
+# ROI画像パス
+# 検知用の参照画像と roi_capture.py のタイムスタンプ付き撮影画像は
+# 別ディレクトリに保存し、試し撮りが検知入力に混ざらないようにする。
+ROI_REFERENCE_DIR = "/home/pi/logs_nse2026/roi"
+ROI_CAPTURE_DIR = os.path.join(ROI_REFERENCE_DIR, "captures")
+ROI_PATH_1 = os.path.join(ROI_REFERENCE_DIR, "captured_roi_img.png")
 # 後方互換のため残すが、実体は同一ファイルを指す
 ROI_PATH_2 = ROI_PATH_1
 ROI_GLOB_PATTERNS = (
-    "captured_roi_img*.png",
-    "captured_roi_img*.jpg",
-    "captured_roi_img*.jpeg",
     "roi_cone*.png",
     "roi_cone*.jpg",
     "roi_cone*.jpeg",
@@ -202,14 +207,8 @@ ROI_GLOB_PATTERNS = (
 PHASE4_SEARCH_OUTER_SPEED = 90
 # 芝生で低速輪がストールしないよう、Phase4 の全動作で最低45%を保つ。
 PHASE4_SEARCH_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
-# Keep the established left-circle search, but periodically stop to obtain
-# sharp, distinct camera frames instead of driving continuously while blind.
-PHASE4_SEARCH_SWEEP_INTERVAL = 2.0
-PHASE4_CAMERA_SETTLE_SEC = 0.25
-PHASE4_CAMERA_OBSERVE_FRAMES = 3
-PHASE4_CAMERA_OBSERVE_TIMEOUT_SEC = 1.20
-PHASE4_WEAK_OBSERVE_FRAMES = 5
-PHASE4_WEAK_OBSERVE_TIMEOUT_SEC = 1.60
+# On grass, an abrupt stop pitches the camera downward.  Phase4 therefore
+# confirms distinct camera sequences while maintaining the established arc.
 PHASE4_REACQUIRE_TURN_SEC = 0.45
 PHASE4_TRACK_ROTATE_GAIN = 60
 PHASE4_TRACK_ROTATE_CLAMP = 18

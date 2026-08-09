@@ -14,13 +14,16 @@ from mission.const import ROI_CAPTURE_DIR, ROI_PATH_1
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Capture ROI reference images used by the production cone detector."
+        description=(
+            "Capture ROI images. Timestamped captures are archived separately from "
+            "the production cone detector reference."
+        )
     )
     parser.add_argument(
         "--count",
         type=int,
         default=1,
-        help="Number of reference images to capture.",
+        help="Number of images to capture.",
     )
     parser.add_argument(
         "--interval",
@@ -39,12 +42,15 @@ def build_parser():
     parser.add_argument(
         "--outdir",
         default=ROI_CAPTURE_DIR,
-        help=f"ROI output directory. Default: {ROI_CAPTURE_DIR}",
+        help=f"Timestamped capture output directory. Default: {ROI_CAPTURE_DIR}",
     )
     parser.add_argument(
         "--prefix",
         default="captured_roi_img",
-        help="Archive filename prefix. Use false_ or fake_ for negative references.",
+        help=(
+            "Archive filename prefix. With the default output directory, false_ or "
+            "fake_ captures are also published as negative references."
+        ),
     )
     parser.add_argument(
         "--no-latest",
@@ -65,7 +71,10 @@ def main():
 
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    latest_path = Path(ROI_PATH_1) if outdir == Path(ROI_CAPTURE_DIR) else outdir / "captured_roi_img.png"
+    using_default_outdir = outdir == Path(ROI_CAPTURE_DIR)
+    latest_path = (
+        Path(ROI_PATH_1) if using_default_outdir else outdir / "captured_roi_img.png"
+    )
 
     picam2 = None
     try:
@@ -79,7 +88,7 @@ def main():
         picam2.start()
 
         print(f"ROI capture started: {args.width}x{args.height}, warmup={args.warmup:.1f}s")
-        print(f"ROI directory: {outdir}")
+        print(f"ROI capture archive directory: {outdir}")
         time.sleep(max(0.0, args.warmup))
 
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -96,8 +105,19 @@ def main():
 
         prefix_lower = args.prefix.lower()
         negative_prefix = any(token in prefix_lower for token in ("false_", "fake_", "grass", "sky", "bg_"))
-        if negative_prefix and not args.no_latest:
-            print("Latest ROI not updated because the prefix is classified as a negative reference.")
+        if negative_prefix:
+            if using_default_outdir:
+                reference_dir = Path(ROI_PATH_1).parent
+                reference_dir.mkdir(parents=True, exist_ok=True)
+                for archive_path in saved_paths:
+                    reference_path = reference_dir / archive_path.name
+                    shutil.copyfile(archive_path, reference_path)
+                    print(f"Negative ROI reference published: {reference_path}")
+            if not args.no_latest:
+                print(
+                    "Latest ROI not updated because the prefix is classified as "
+                    "a negative reference."
+                )
         elif not args.no_latest and saved_paths:
             latest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(saved_paths[-1], latest_path)

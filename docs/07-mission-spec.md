@@ -30,7 +30,7 @@ Current numeric thresholds, pins, speeds, and budgets are authoritative in `miss
 | P1 separation | Run the Manager-owned separation pattern for a bounded interval; collect only diagnostic heading-offset evidence | P2 after interval | Controller budget also forces P2 | elapsed time, motor command, candidate quality |
 | P2 escape/calibration/alignment | Escape parachute, calibrate, learn GPS/BNO offset from a straight stable segment, confirm heading readiness | P3 when heading is ready; P4 if GPS arrival was already confirmed | Bounded reorientation/retry; best-effort/fallback offset; controller timeout | stage/mode, calibration, progress, reject reason, offset validity |
 | P3 GPS navigation | Compute distance/azimuth from valid GPS; prefer GPS-aligned BNO for high-rate steering; confirm arrival over samples/time | P4 on confirmed arrival | P4 on local/cumulative timeout; continue conservatively when heading is unavailable | GPS quality/sequence, heading source/trust, arrival latch |
-| P4 visual search/alignment | Search on a tight 45/90% forward arc and align; require probability, centering, direction consistency, or effective reached evidence | P5 only on confirmed detection | P3 when GPS says far before arrival latch; P7 give-up on local/cumulative timeout or exhausted camera recovery | probability, method/direction, confirmation count, camera health/reinit attempts |
+| P4 visual search/alignment | Search continuously on a tight forward arc; confirm distinct frames without stopping or steering toward a single candidate | P5 only on confirmed detection | P3 when GPS says far before arrival latch; P7 give-up on local/cumulative timeout or exhausted camera recovery | probability, method/direction, confirmation count, camera health/reinit attempts |
 | P5 visual approach | Approach using visual steering; confirm reached over multiple frames | P6 with `GOAL_REACHED` | P4 after bounded loss; P3 when far/camera dead; P6 with forced-goal timeout reason | entry reason, loss/reach counts, timeout, command |
 | P6 final ram | Apply short bounded forward command only when not globally timed out | P7 after duration | Immediate P7 on total-timeout state | mission end reason, duration, command |
 | P7 terminal | Stop motors, resolve arrival semantics, signal goal/give-up, request shutdown | Process exit | None | arrival reason, mission end reason, final row |
@@ -58,6 +58,8 @@ Current numeric thresholds, pins, speeds, and budgets are authoritative in `miss
 
 - Keep detector acquisition/normalization in the sensor/vision layer and mission interpretation in the Phase.
 - Require short-term consistency for P4 detection; a weak single frame must not transition.
+- Keep the P4 search arc continuous while the camera is fresh; an abrupt observation stop changes the camera pitch on this airframe.
+- Compensate P4 candidate direction with heading when available and reject discontinuous vertical position or scale before confirmation.
 - In P5, reset reach confirmation on non-reached evidence.
 - Distinguish cone loss (`P5 -> P4`) from a P4 timeout or exhausted camera recovery (`P4 -> P7`).
 - In P4, allow at most three camera recreations at five-second intervals and require a valid captured frame before declaring recovery; retain at least a 15-second recovery window.

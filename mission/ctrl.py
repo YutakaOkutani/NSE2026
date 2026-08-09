@@ -90,6 +90,10 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.log_path, self.run_stem = self._build_unique_log_path(resolved_log_dir, now_time)
         self.run_dir = resolved_log_dir
         self.capture_reached_path = os.path.join(self.run_dir, self.run_stem + "_capture_reached.png")
+        self.camera_evidence_dir = os.path.join(
+            self.run_dir,
+            self.run_stem + "_camera",
+        )
 
         self.devices = {key: None for key in DEVICE_KEYS}
         self.i2c_lock = threading.RLock()
@@ -211,10 +215,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase3_arrived_latched = False
         self.phase4_detect_confirm_count = 0
         self.phase4_detect_confirm_marker = None
+        self.phase4_detect_track_signature = None
         self.phase4_last_processed_cone_seq = 0
         self.phase4_weak_confirm_count = 0
         self.phase4_weak_confirm_marker = None
         self.phase4_weak_missed_frames = 0
+        self.phase4_weak_track_signature = None
         self.phase5_last_processed_cone_seq = 0
         self.cone_phase_decision = "not_evaluated"
         self.cone_phase_threshold = 0.0
@@ -347,10 +353,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             self.searching_flag = False
             self.phase4_detect_confirm_count = 0
             self.phase4_detect_confirm_marker = None
+            self.phase4_detect_track_signature = None
             self.phase4_last_processed_cone_seq = 0
             self.phase4_weak_confirm_count = 0
             self.phase4_weak_confirm_marker = None
             self.phase4_weak_missed_frames = 0
+            self.phase4_weak_track_signature = None
         elif phase_enum == Phase.PHASE5:
             self.time_phase5_start = now
             self.phase5_last_processed_cone_seq = 0
