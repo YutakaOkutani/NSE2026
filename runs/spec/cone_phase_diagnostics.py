@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mission.const import Phase
+from mission.const import Phase, CONE_PHASE5_REACH_CONFIRM_FRAMES
 from mission.phases.p4 import Phase4Handler
 from mission.phases.p5 import Phase5Handler
 from mission.st import CanSatState
@@ -205,8 +205,8 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
                 "bbox_x": 307,
                 "bbox_y": 458,
                 "bbox_width": 30,
-                "bbox_height": 22,
-                "bbox_height_frac": 22 / 480,
+                "bbox_height": 10,
+                "bbox_height_frac": 10 / 480,
             },
         )
         with patch("mission.phases.p4.time.time", return_value=100.6):
@@ -301,7 +301,7 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         self.assertEqual(ctrl.cone_phase_decision, "p5_cone_lost_counting")
         self.assertFalse(ctrl.cone_phase_reached_effective)
         self.assertEqual(ctrl.cone_phase_reached_probability_threshold, 0.30)
-        self.assertEqual(ctrl.cone_phase_required_confirm_frames, 8)
+        self.assertEqual(ctrl.cone_phase_required_confirm_frames, int(CONE_PHASE5_REACH_CONFIRM_FRAMES))
 
     def test_phase4_confirmation_counts_each_camera_sequence_once(self):
         ctrl = _VisionController(Phase.PHASE4)

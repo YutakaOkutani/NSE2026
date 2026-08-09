@@ -9,6 +9,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from mission.const import PHASE4_SEARCH_OUTER_SPEED
+
 MOTOR_DIAG_PATH = PROJECT_ROOT / "runs" / "diag" / "motor.py"
 spec = importlib.util.spec_from_file_location("motor_diag_under_test", MOTOR_DIAG_PATH)
 motor_diag = importlib.util.module_from_spec(spec)
@@ -116,7 +118,7 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
 
         self.assertEqual(
             (phase4_search_left["speed_left"], phase4_search_left["speed_right"]),
-            (45.0, 90.0),
+            (45.0, float(PHASE4_SEARCH_OUTER_SPEED)),
         )
         self.assertEqual(
             (phase4_align_left["speed_left"], phase4_align_left["speed_right"]),

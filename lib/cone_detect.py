@@ -29,8 +29,8 @@ class detector:
 
         # Goal (close contact) judgment: screen should be mostly red and touching edges
         # Goal判定はやや厳しめにする（近距離で画面を大きく占有していること）
-        self.reached_occupancy_thresh = 0.26
-        self.reached_edge_touch_min = 2
+        self.reached_occupancy_thresh = 0.10
+        self.reached_edge_touch_min = 1
 
         # Runtime state
         self.input_img = None
@@ -86,11 +86,11 @@ class detector:
         self.roi_negative_weight = 0.0
         self.negative_backproj_scale = 0.85
         self.roi_hist_min_support_ratio = 0.18
-        self.strict_red_min_hue_score = 0.58
+        self.strict_red_min_hue_score = 0.42
         self.strict_red_min_sv_score = 0.28
         self.strict_red_min_shape_score = 0.32
         self.strict_red_min_prob = 0.18
-        self.relaxed_red_min_hue_score = 0.45
+        self.relaxed_red_min_hue_score = 0.38
         self.relaxed_red_min_sv_score = 0.20
         # Keep relaxed candidates below both Phase4 (0.20) and Phase5 (0.18)
         # drive thresholds; temporal confirmation promotes them separately.
@@ -863,7 +863,7 @@ class detector:
         val_mean = float(np.mean(val))
         # Circular distance on OpenCV hue scale [0,179]; red is near 0/179.
         hue_dist = np.minimum(hue, 180.0 - hue)
-        hue_redness = 1.0 - np.clip(hue_dist / 18.0, 0.0, 1.0)
+        hue_redness = 1.0 - np.clip(hue_dist / 30.0, 0.0, 1.0)
 
         # Score hue mainly on strongly chromatic pixels to suppress grass/ground false positives.
         color_valid = np.logical_and(sat >= 90.0, val >= 50.0)

@@ -16,6 +16,8 @@ spec.loader.exec_module(mtr_mgr_under_test)
 MotorManager = mtr_mgr_under_test.MotorManager
 
 
+from mission.const import PHASE4_SEARCH_OUTER_SPEED
+
 class _HeadingOnlyController(MotorManager):
     def __init__(self):
         self.bno_heading_offset_valid = False
@@ -113,7 +115,7 @@ class Phase3HeadingTest(unittest.TestCase):
         ctrl._drive_phase4_camera(self._fresh_camera_snapshot())
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 90))
+        self.assertEqual((args[0], args[2]), (45, int(PHASE4_SEARCH_OUTER_SPEED)))
         self.assertGreaterEqual(min(args[0], args[2]), 45.0)
         self.assertTrue(args[1])
         self.assertTrue(args[3])
@@ -158,7 +160,7 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 90))
+        self.assertEqual((args[0], args[2]), (45, int(PHASE4_SEARCH_OUTER_SPEED)))
         self.assertEqual(kwargs["cmd_type"], "phase4_search_arc")
 
     def test_phase4_tiny_candidate_requires_three_consistent_frames_to_steer(self):
@@ -334,7 +336,7 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 90))
+        self.assertEqual((args[0], args[2]), (45, int(PHASE4_SEARCH_OUTER_SPEED)))
         self.assertEqual(kwargs["cmd_type"], "phase4_search_arc")
 
     def test_phase4_search_remains_continuous_across_distinct_frames(self):
