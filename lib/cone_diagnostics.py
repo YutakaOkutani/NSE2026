@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 
-CONE_DIAGNOSTIC_SCHEMA_VERSION = 2
+CONE_DIAGNOSTIC_SCHEMA_VERSION = 3
 
 # key, mission CSV column, default, value kind
 CONE_DIAGNOSTIC_FIELDS = (
@@ -14,6 +14,8 @@ CONE_DIAGNOSTIC_FIELDS = (
     ("status", "ConeStatus", "not_started", "str"),
     ("sequence", "ConeSeq", 0, "int"),
     ("direction", "ConeDir", 0.5, "float"),
+    ("image_direction", "ConeImageDir", 0.5, "float"),
+    ("image_direction_valid", "ConeImageDirValid", 0, "int"),
     ("probability", "ConeProb", 0.0, "float"),
     ("method", "ConeMethod", "", "str"),
     ("is_detected", "ConeIsDetected", 0, "int"),
@@ -31,6 +33,9 @@ CONE_DIAGNOSTIC_FIELDS = (
     ("sv_score", "ConeSVScore", 0.0, "float"),
     ("hue_redness_score", "ConeHueScore", 0.0, "float"),
     ("roi_support_ratio", "ConeROISupport", 0.0, "float"),
+    ("candidate_count", "ConeCandidateCount", 0, "int"),
+    ("candidate_rank", "ConeCandidateRank", 0, "int"),
+    ("candidate_temporal_bonus", "ConeCandidateTemporalBonus", 0.0, "float"),
     ("edge_touch_count", "ConeEdgeTouchCount", 0, "int"),
     ("bbox_x", "ConeBBoxX", 0, "int"),
     ("bbox_y", "ConeBBoxY", 0, "int"),

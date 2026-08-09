@@ -12,10 +12,12 @@ if str(PROJECT_ROOT) not in sys.path:
 from mission.const import (
     CAMERA_FRAME_STALE_STOP_SEC,
     CAMERA_HORIZONTAL_FOV_DEG,
+    CAMERA_MIXED_CONFIRM_FRAMES,
     CAMERA_WEAK_CONFIRM_FRAMES,
     CAMERA_WEAK_MAX_MISSED_FRAMES,
     CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
     CAMERA_WEAK_MIN_HUE_SCORE,
+    CAMERA_WEAK_MIN_ROI_SUPPORT,
     CAMERA_WEAK_MIN_SHAPE_SCORE,
     CAMERA_WEAK_MIN_SV_SCORE,
     CAMERA_WEAK_RELAXED_SV_SCORE,
@@ -26,7 +28,6 @@ from mission.const import (
     CONE_PHASE4_BBOX_VERTICAL_OVERLAP_MIN,
     CONE_PHASE4_BEARING_CONSISTENCY_TOLERANCE_DEG,
     CONE_PHASE4_CENTER_TOLERANCE,
-    CONE_PHASE4_CONFIRM_FRAMES,
     CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE,
     CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD,
@@ -35,6 +36,7 @@ from mission.const import (
     DEVICE_LED_RED,
     GPS_ACTIVE_DETECT,
     GPS_PHASE45_MAX_DISTANCE,
+    PHASE4_CANDIDATE_CAPTURE_SEC,
     Phase,
     TIMEOUT_PHASE_4,
 )
@@ -66,6 +68,7 @@ class Phase4Handler(BasePhaseHandler):
         shape = self._float_value(debug.get("cone_shape_score", 0.0))
         hue = self._float_value(debug.get("hue_redness_score", 0.0))
         sv = self._float_value(debug.get("sv_score", 0.0))
+        roi_support = self._float_value(debug.get("roi_support_ratio", 0.0))
         ground_penalty = self._float_value(debug.get("ground_penalty", 1.0), 1.0)
         bbox_height = self._float_value(debug.get("bbox_height", 0.0))
         bbox_bottom = self._float_value(debug.get("bbox_bottom_frac", 0.0))
@@ -77,11 +80,19 @@ class Phase4Handler(BasePhaseHandler):
             hue >= CAMERA_WEAK_STRONG_HUE_SCORE
             and sv >= CAMERA_WEAK_RELAXED_SV_SCORE
         )
+        reference_quality = (
+            roi_support >= CAMERA_WEAK_MIN_ROI_SUPPORT
+            or (
+                hue >= CAMERA_WEAK_STRONG_HUE_SCORE
+                and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE + 0.10
+            )
+        )
         return bool(
             centered
             and candidate_prob >= CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY
             and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE
             and color_quality
+            and reference_quality
             and ground_penalty >= 0.5
             and "upper_sky" not in penalty_flags
             and (bbox_height <= 0.0 or bbox_bottom >= 0.35)
@@ -95,18 +106,6 @@ class Phase4Handler(BasePhaseHandler):
         debug = dict(snapshot.get("cone_debug", {}) or {})
         heading = None
         bearing = None
-        if bool(snapshot.get("angle_valid", False)):
-            try:
-                heading = float(snapshot.get("angle")) % 360.0
-                bearing = (
-                    heading
-                    + (float(cone_dir) - CONE_CENTER_POSITION)
-                    * float(CAMERA_HORIZONTAL_FOV_DEG)
-                ) % 360.0
-            except (TypeError, ValueError):
-                heading = None
-                bearing = None
-
         bbox_x = self._float_value(debug.get("bbox_x", 0.0))
         bbox_y = self._float_value(debug.get("bbox_y", 0.0))
         bbox_w = self._float_value(debug.get("bbox_width", 0.0))
@@ -116,6 +115,9 @@ class Phase4Handler(BasePhaseHandler):
         )
         reported_bottom_frac = self._float_value(
             debug.get("bbox_bottom_frac", 0.0)
+        )
+        reported_width_frac = self._float_value(
+            debug.get("bbox_width_frac", 0.0)
         )
         bbox_valid = (
             bbox_w > 0.0
@@ -135,8 +137,38 @@ class Phase4Handler(BasePhaseHandler):
             height_frac = 0.0
             bottom_frac = 0.0
 
+        # cone_dir is intentionally mirrored into the rover control frame.
+        # Bearing consistency must instead use the physical image X axis, where
+        # image-right is a positive camera offset from the compass heading.
+        image_direction = None
+        if bbox_valid and reported_width_frac > 0.0:
+            frame_width = bbox_w / reported_width_frac
+            image_direction = (bbox_x + 0.5 * bbox_w) / max(frame_width, 1.0)
+        elif bool(int(self._float_value(debug.get("image_direction_valid", 0.0)))):
+            image_direction = self._float_value(
+                debug.get("image_direction", CONE_CENTER_POSITION),
+                CONE_CENTER_POSITION,
+            )
+        else:
+            # Backward-compatible fallback for logs produced before schema v3.
+            image_direction = 1.0 - float(cone_dir)
+        image_direction = max(0.0, min(1.0, float(image_direction)))
+
+        if bool(snapshot.get("angle_valid", False)):
+            try:
+                heading = float(snapshot.get("angle")) % 360.0
+                bearing = (
+                    heading
+                    + (image_direction - CONE_CENTER_POSITION)
+                    * float(CAMERA_HORIZONTAL_FOV_DEG)
+                ) % 360.0
+            except (TypeError, ValueError):
+                heading = None
+                bearing = None
+
         return {
             "direction": float(cone_dir),
+            "image_direction": image_direction,
             "heading": heading,
             "bearing": bearing,
             "bbox_valid": bbox_valid,
@@ -215,6 +247,8 @@ class Phase4Handler(BasePhaseHandler):
         controller.phase4_detect_confirm_count = 0
         controller.phase4_detect_confirm_marker = None
         controller.phase4_detect_track_signature = None
+        controller.phase4_track_has_strict = False
+        controller.phase4_candidate_missed_frames = 0
 
     @staticmethod
     def _reset_weak_confirmation(controller):
@@ -222,6 +256,18 @@ class Phase4Handler(BasePhaseHandler):
         controller.phase4_weak_confirm_marker = None
         controller.phase4_weak_missed_frames = 0
         controller.phase4_weak_track_signature = None
+
+    @staticmethod
+    def _arm_candidate_capture(controller, now, cone_dir):
+        controller.phase4_search_state = "capture"
+        controller.phase4_last_candidate_dir = float(cone_dir)
+        capture_sec = float(getattr(controller, "phase4_candidate_capture_sec", 0.0))
+        if capture_sec <= 0.0:
+            capture_sec = float(PHASE4_CANDIDATE_CAPTURE_SEC)
+        controller.phase4_candidate_active_until = max(
+            float(getattr(controller, "phase4_candidate_active_until", 0.0) or 0.0),
+            float(now) + capture_sec,
+        )
 
     def _fallback_to_p3(self, controller, current_snapshot, reason):
         fallback_dir = current_snapshot["angle"] if current_snapshot["angle_valid"] else current_snapshot["direction"]
@@ -231,6 +277,8 @@ class Phase4Handler(BasePhaseHandler):
         controller.searching_flag = False
         self._reset_strong_confirmation(controller)
         self._reset_weak_confirmation(controller)
+        controller.phase4_candidate_active_until = 0.0
+        controller.phase4_search_state = "drive"
         controller.time_phase3_start = time.time()
 
     def execute(self, controller, snapshot):
@@ -245,6 +293,8 @@ class Phase4Handler(BasePhaseHandler):
             controller.phase4_last_processed_cone_seq = 0
             self._reset_strong_confirmation(controller)
             self._reset_weak_confirmation(controller)
+            controller.phase4_candidate_active_until = 0.0
+            controller.phase4_search_state = "drive"
             recovery_started = getattr(controller, "camera_recovery_started_at", None)
             # Preserve a campaign started by the camera thread just after this
             # P4 entry, but discard exhausted/stale state inherited from P3/P5.
@@ -275,7 +325,7 @@ class Phase4Handler(BasePhaseHandler):
         controller.cone_phase_direction_tolerance = float(
             CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE
         )
-        controller.cone_phase_required_confirm_frames = int(CONE_PHASE4_CONFIRM_FRAMES)
+        controller.cone_phase_required_confirm_frames = int(CAMERA_MIXED_CONFIRM_FRAMES)
         controller.cone_phase_detected = False
         controller.cone_phase_reached_effective = bool(cone_reached_effective)
         controller.cone_phase_centered = False
@@ -332,9 +382,11 @@ class Phase4Handler(BasePhaseHandler):
             )
             return
         if cone_sequence == int(getattr(controller, "phase4_last_processed_cone_seq", 0)):
-            if int(getattr(controller, "phase4_weak_confirm_count", 0)) > 0:
+            if int(getattr(controller, "phase4_detect_confirm_count", 0)) > 0:
                 controller.cone_phase_required_confirm_frames = int(
-                    CAMERA_WEAK_CONFIRM_FRAMES
+                    CAMERA_MIXED_CONFIRM_FRAMES
+                    if bool(getattr(controller, "phase4_track_has_strict", False))
+                    else CAMERA_WEAK_CONFIRM_FRAMES
                 )
             controller.cone_phase_decision = "p4_wait_new_frame"
             return
@@ -356,105 +408,89 @@ class Phase4Handler(BasePhaseHandler):
         loose_detect = cone_prob > CONE_PROBABILITY_THRESHOLD
         weak_detect = self._weak_candidate(current_snapshot, cone_dir_val)
         signature = self._candidate_signature(current_snapshot, cone_dir_val)
-        dir_marker = getattr(controller, "phase4_detect_confirm_marker", None)
-        dir_consistent, strong_consistency_reason = self._candidate_consistency(
+        candidate_detect = bool(cone_reached_effective or strict_detect or weak_detect)
+        consistent, consistency_reason = self._candidate_consistency(
             getattr(controller, "phase4_detect_track_signature", None),
             signature,
         )
 
-        controller.cone_phase_detected = bool(strict_detect or weak_detect)
+        controller.cone_phase_detected = candidate_detect
         controller.cone_phase_centered = bool(centered)
-        controller.cone_phase_direction_consistent = bool(strict_detect and dir_consistent)
+        controller.cone_phase_direction_consistent = bool(candidate_detect and consistent)
 
-        if cone_reached_effective or strict_detect:
-            if cone_reached_effective:
-                controller.cone_phase_decision = "p4_reached_confirm"
-                controller.phase4_detect_confirm_count = getattr(controller, "phase4_detect_confirm_count", 0) + 1
-                controller.phase4_detect_confirm_marker = cone_dir_val
-            elif dir_consistent:
-                controller.cone_phase_decision = "p4_strict_confirm"
-                controller.phase4_detect_confirm_count = getattr(controller, "phase4_detect_confirm_count", 0) + 1
-                controller.phase4_detect_track_signature = signature
-                if dir_marker is None:
+        if candidate_detect:
+            current_is_strict = bool(cone_reached_effective or strict_detect)
+            previous_marker = getattr(controller, "phase4_detect_confirm_marker", None)
+            if consistent:
+                controller.phase4_detect_confirm_count = int(
+                    getattr(controller, "phase4_detect_confirm_count", 0)
+                ) + 1
+                controller.phase4_track_has_strict = bool(
+                    getattr(controller, "phase4_track_has_strict", False)
+                    or current_is_strict
+                )
+                if previous_marker is None:
                     controller.phase4_detect_confirm_marker = cone_dir_val
                 else:
-                    controller.phase4_detect_confirm_marker = 0.7 * float(dir_marker) + 0.3 * cone_dir_val
-            else:
-                controller.cone_phase_decision = (
-                    f"p4_track_reset_{strong_consistency_reason}"
-                )
-                controller.phase4_detect_confirm_count = 1
-                controller.phase4_detect_confirm_marker = cone_dir_val
-                controller.phase4_detect_track_signature = signature
-        elif loose_detect:
-            controller.cone_phase_decision = "p4_low_confidence_reset"
-            self._reset_strong_confirmation(controller)
-        else:
-            controller.cone_phase_decision = "p4_no_detection"
-            self._reset_strong_confirmation(controller)
-
-        weak_marker = getattr(controller, "phase4_weak_confirm_marker", None)
-        if weak_detect:
-            weak_consistent, weak_consistency_reason = self._candidate_consistency(
-                getattr(controller, "phase4_weak_track_signature", None),
-                signature,
-            )
-            if weak_consistent:
-                controller.phase4_weak_confirm_count = int(
-                    getattr(controller, "phase4_weak_confirm_count", 0)
-                ) + 1
-                controller.phase4_weak_track_signature = signature
-                if weak_marker is None:
-                    controller.phase4_weak_confirm_marker = cone_dir_val
+                    controller.phase4_detect_confirm_marker = (
+                        0.7 * self._float_value(previous_marker, cone_dir_val)
+                        + 0.3 * cone_dir_val
+                    )
+                if cone_reached_effective:
+                    controller.cone_phase_decision = "p4_reached_confirm"
+                elif strict_detect:
+                    controller.cone_phase_decision = "p4_strict_confirm"
                 else:
-                    controller.phase4_weak_confirm_marker = (
-                        0.7 * self._float_value(weak_marker, cone_dir_val) + 0.3 * cone_dir_val
-                    )
+                    controller.cone_phase_decision = "p4_weak_confirm"
             else:
-                controller.phase4_weak_confirm_count = 1
-                controller.phase4_weak_confirm_marker = cone_dir_val
-                controller.phase4_weak_track_signature = signature
-                if not strict_detect:
-                    controller.cone_phase_decision = (
-                        f"p4_weak_track_reset_{weak_consistency_reason}"
-                    )
-            controller.phase4_weak_missed_frames = 0
-            if not strict_detect and weak_consistent:
-                controller.cone_phase_decision = "p4_weak_confirm"
-            if not strict_detect:
-                controller.cone_phase_direction_consistent = bool(weak_consistent)
-        elif int(getattr(controller, "phase4_weak_confirm_count", 0)) > 0:
-            controller.phase4_weak_missed_frames = int(
-                getattr(controller, "phase4_weak_missed_frames", 0)
-            ) + 1
-            if controller.phase4_weak_missed_frames > CAMERA_WEAK_MAX_MISSED_FRAMES:
-                self._reset_weak_confirmation(controller)
+                controller.phase4_detect_confirm_count = 1
+                controller.phase4_track_has_strict = current_is_strict
+                controller.phase4_detect_confirm_marker = cone_dir_val
+                prefix = "p4_track_reset" if current_is_strict else "p4_weak_track_reset"
+                controller.cone_phase_decision = f"{prefix}_{consistency_reason}"
+            controller.phase4_detect_track_signature = signature
+            controller.phase4_candidate_missed_frames = 0
+            self._arm_candidate_capture(controller, now, cone_dir_val)
+        else:
+            controller.cone_phase_decision = (
+                "p4_low_confidence_hold" if loose_detect else "p4_no_detection"
+            )
+            if int(getattr(controller, "phase4_detect_confirm_count", 0)) > 0:
+                controller.phase4_candidate_missed_frames = int(
+                    getattr(controller, "phase4_candidate_missed_frames", 0)
+                ) + 1
+                if (
+                    controller.phase4_candidate_missed_frames
+                    > CAMERA_WEAK_MAX_MISSED_FRAMES
+                ):
+                    self._reset_strong_confirmation(controller)
 
-        controller.cone_phase_confirm_count = max(
-            int(controller.phase4_detect_confirm_count),
-            int(getattr(controller, "phase4_weak_confirm_count", 0)),
+        has_strict = bool(getattr(controller, "phase4_track_has_strict", False))
+        required_frames = (
+            CAMERA_MIXED_CONFIRM_FRAMES if has_strict else CAMERA_WEAK_CONFIRM_FRAMES
         )
-        if weak_detect and not strict_detect:
-            controller.cone_phase_required_confirm_frames = int(CAMERA_WEAK_CONFIRM_FRAMES)
+        controller.cone_phase_confirm_count = int(
+            getattr(controller, "phase4_detect_confirm_count", 0)
+        )
+        controller.cone_phase_required_confirm_frames = int(required_frames)
+        # Legacy fields remain mirrored for existing logs and external tooling.
+        controller.phase4_weak_confirm_count = (
+            controller.cone_phase_confirm_count if not has_strict else 0
+        )
+        controller.phase4_weak_missed_frames = int(
+            getattr(controller, "phase4_candidate_missed_frames", 0)
+        )
 
-        # 近距離ではコーンが画面からはみ出してprobが落ちても、到達判定が立てば進める。
-        weak_confirmed = (
-            int(getattr(controller, "phase4_weak_confirm_count", 0))
-            >= CAMERA_WEAK_CONFIRM_FRAMES
-        )
-        if (
-            cone_reached_effective
-            or controller.phase4_detect_confirm_count >= CONE_PHASE4_CONFIRM_FRAMES
-            or weak_confirmed
-        ):
+        confirmed = controller.cone_phase_confirm_count >= required_frames
+        if confirmed:
             if cone_reached_effective:
                 controller.cone_phase_decision = "p4_reached_to_p5"
                 print("Phase4 -> Phase5: close-range visual reached detected")
-            elif weak_confirmed and controller.phase4_detect_confirm_count < CONE_PHASE4_CONFIRM_FRAMES:
+            elif not has_strict:
                 controller.cone_phase_decision = "p4_weak_confirmed_to_p5"
                 print(
                     "Phase4 -> Phase5: temporally stable weak cone candidate "
-                    f"(confirm={controller.phase4_weak_confirm_count})"
+                    f"(confirm={controller.cone_phase_confirm_count})"
                 )
             else:
                 controller.cone_phase_decision = "p4_confirmed_to_p5"
@@ -465,12 +501,13 @@ class Phase4Handler(BasePhaseHandler):
             controller.searching_flag = False
             self._reset_strong_confirmation(controller)
             self._reset_weak_confirmation(controller)
+            controller.phase4_candidate_active_until = 0.0
             controller.phase5_last_processed_cone_seq = 0
             controller.phase5_entry_reason = "phase4_detected"
             controller.st.update_navigation(phase=int(Phase.PHASE5))
             return
 
-        if loose_detect and controller.led_blink_timer % 10 == 0:
+        if loose_detect and not candidate_detect and controller.led_blink_timer % 10 == 0:
             print(
                 f"Phase4: low-confidence cone ignored (prob={cone_prob:.2f}, dir={cone_dir_val:.2f})"
             )

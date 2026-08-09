@@ -33,6 +33,9 @@ class _FakeDetector:
         "pre_filter_probability": 1.0,
         "close_reached_ok": 1,
         "penalty_flags": "strict_red_x0.08",
+        "image_direction": 0.27,
+        "image_direction_valid": 1,
+        "candidate_count": 7,
     }
 
 
@@ -57,6 +60,9 @@ class ConeDiagnosticsTest(unittest.TestCase):
         self.assertEqual(diagnostics["pre_filter_probability"], 1.0)
         self.assertEqual(diagnostics["close_reached_ok"], 1)
         self.assertEqual(diagnostics["penalty_flags"], "strict_red_x0.08")
+        self.assertEqual(diagnostics["image_direction"], 0.27)
+        self.assertEqual(diagnostics["image_direction_valid"], 1)
+        self.assertEqual(diagnostics["candidate_count"], 7)
 
     def test_mission_values_follow_shared_schema_order(self):
         diagnostics = detector_diagnostics(_FakeDetector(), sequence=3)

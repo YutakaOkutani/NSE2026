@@ -117,7 +117,7 @@ class LogSchemaTest(unittest.TestCase):
             row = ctrl._build_log_row()
         by_name = dict(zip(LOG_HEADER, row))
 
-        self.assertEqual(by_name["ConeDiagSchemaVersion"], 2)
+        self.assertEqual(by_name["ConeDiagSchemaVersion"], 3)
         self.assertEqual(by_name["ConeValid"], 1)
         self.assertEqual(by_name["ConeSeq"], 1)
         self.assertEqual(by_name["ConeIsReached"], 1)

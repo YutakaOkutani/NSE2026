@@ -1,6 +1,7 @@
 # Analyzer generated outputs (graphs/images/csv summaries)
 analysis/outputs/
 analysis/robust_logs/*.csv
+analysis/robust_logs/*_camera/
 analysis/explorer_outputs/
 
 # Python cache

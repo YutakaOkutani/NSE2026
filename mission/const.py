@@ -180,7 +180,11 @@ CAMERA_WEAK_MIN_HUE_SCORE = 0.45
 CAMERA_WEAK_MIN_SV_SCORE = 0.28
 CAMERA_WEAK_STRONG_HUE_SCORE = 0.58
 CAMERA_WEAK_RELAXED_SV_SCORE = 0.20
-CAMERA_WEAK_CONFIRM_FRAMES = 4
+CAMERA_WEAK_MIN_ROI_SUPPORT = 0.10
+# A track containing at least one strict observation needs two consistent
+# frames.  Weak-only tracks need three fresh frames.
+CAMERA_MIXED_CONFIRM_FRAMES = 2
+CAMERA_WEAK_CONFIRM_FRAMES = 3
 CAMERA_WEAK_MAX_MISSED_FRAMES = 1
 
 # ROI画像パス
@@ -207,9 +211,12 @@ ROI_GLOB_PATTERNS = (
 PHASE4_SEARCH_OUTER_SPEED = 90
 # 芝生で低速輪がストールしないよう、Phase4 の全動作で最低45%を保つ。
 PHASE4_SEARCH_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
-# On grass, an abrupt stop pitches the camera downward.  Phase4 therefore
-# confirms distinct camera sequences while maintaining the established arc.
-PHASE4_REACQUIRE_TURN_SEC = 0.45
+# A plausible visual candidate temporarily slows the arc without issuing a
+# hard stop.  This leaves enough time for 3-5 fresh frames at the field rate.
+PHASE4_CANDIDATE_CAPTURE_SEC = 1.10
+PHASE4_CANDIDATE_OUTER_SPEED = 60
+PHASE4_CANDIDATE_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
+PHASE4_REACQUIRE_TURN_SEC = 0.80
 PHASE4_TRACK_ROTATE_GAIN = 60
 PHASE4_TRACK_ROTATE_CLAMP = 18
 PHASE4_TRACK_MIN_ROTATE_SPEED = 5

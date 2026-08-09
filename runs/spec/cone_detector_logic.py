@@ -75,6 +75,69 @@ class ConeDetectorLogicTest(unittest.TestCase):
         self.assertTrue(rescued)
         self.assertEqual(probability, 0.24)
 
+    def test_small_fragment_requires_roi_or_strong_color_support(self):
+        detector = object.__new__(Detector)
+        detector.min_component_occupancy = 0.001
+        fragment = {
+            "occupancy": 0.0003,
+            "cone_shape_score": 0.40,
+            "hue_redness_score": 0.52,
+            "sv_score": 0.35,
+        }
+
+        self.assertFalse(
+            detector._detector__proposal_is_eligible(fragment, 0.02, "hue")
+        )
+        self.assertTrue(
+            detector._detector__proposal_is_eligible(fragment, 0.22, "hue")
+        )
+        self.assertTrue(
+            detector._detector__proposal_is_eligible(
+                fragment,
+                0.0,
+                "hybrid_overlap",
+            )
+        )
+
+    def test_hybrid_candidate_receives_mode_preference(self):
+        component = {"score": 0.30, "occupancy": 0.01}
+
+        hue_score = Detector._detector__candidate_mode_score(
+            component,
+            0.5,
+            "hue",
+        )
+        hybrid_score = Detector._detector__candidate_mode_score(
+            component,
+            0.5,
+            "hybrid_overlap",
+        )
+
+        self.assertGreater(hybrid_score, hue_score)
+
+    def test_temporal_candidate_bonus_prefers_continuous_track(self):
+        detector = object.__new__(Detector)
+        detector.camera_width = 640
+        detector._candidate_track_direction = 0.25
+        detector._candidate_track_height = 100.0
+        detector._candidate_track_mode = "hue"
+        detector._candidate_track_at = 10.0
+        near = {"centroid": [180, 200], "bbox": [150, 100, 60, 110]}
+        far = {"centroid": [600, 200], "bbox": [570, 100, 60, 110]}
+
+        near_bonus = detector._detector__candidate_temporal_bonus(
+            near,
+            "hue",
+            10.2,
+        )
+        far_bonus = detector._detector__candidate_temporal_bonus(
+            far,
+            "hue",
+            10.2,
+        )
+
+        self.assertGreater(near_bonus, far_bonus)
+
 
 if __name__ == "__main__":
     unittest.main()

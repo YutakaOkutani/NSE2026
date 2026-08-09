@@ -216,6 +216,11 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         self.phase4_detect_confirm_count = 0
         self.phase4_detect_confirm_marker = None
         self.phase4_detect_track_signature = None
+        self.phase4_track_has_strict = False
+        self.phase4_candidate_missed_frames = 0
+        self.phase4_candidate_active_until = 0.0
+        self.phase4_last_candidate_dir = None
+        self.phase4_search_state = "drive"
         self.phase4_last_processed_cone_seq = 0
         self.phase4_weak_confirm_count = 0
         self.phase4_weak_confirm_marker = None
@@ -354,6 +359,11 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
             self.phase4_detect_confirm_count = 0
             self.phase4_detect_confirm_marker = None
             self.phase4_detect_track_signature = None
+            self.phase4_track_has_strict = False
+            self.phase4_candidate_missed_frames = 0
+            self.phase4_candidate_active_until = 0.0
+            self.phase4_last_candidate_dir = None
+            self.phase4_search_state = "drive"
             self.phase4_last_processed_cone_seq = 0
             self.phase4_weak_confirm_count = 0
             self.phase4_weak_confirm_marker = None

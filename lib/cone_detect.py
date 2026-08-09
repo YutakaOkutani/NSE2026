@@ -1,6 +1,7 @@
 # encoding: utf-8
 import os
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -16,6 +17,8 @@ class detector:
         self.cone_ratio = 33 / 70
         self.ratio_thresh = 0.12
         self.min_component_occupancy = 0.001
+        self.proposal_min_component_occupancy = 0.00018
+        self.max_candidates_per_mode = 5
         self.backproj_rescue_min_occupancy = 0.006
 
         # Goal (close contact) judgment: screen should be mostly red and touching edges
@@ -42,6 +45,13 @@ class detector:
         self.evidence_interval_sec = 2.0
         self._last_evidence_save_at = 0.0
         self._evidence_sequence = 0
+        self._evidence_frame_sequence = 0
+        self._evidence_burst_until = 0.0
+        self._evidence_last_trigger_at = 0.0
+        self._evidence_saved_sequences = set()
+        self._evidence_recent_frames = deque(maxlen=6)
+        self.evidence_burst_duration_sec = 1.0
+        self.evidence_burst_cooldown_sec = 1.5
 
         # Camera
         self.picam2 = None
@@ -127,6 +137,11 @@ class detector:
         self.mask_min_component_area_ratio = 0.00008
         self.mask_open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         self.mask_close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        self._candidate_color_masks = {}
+        self._candidate_track_direction = None
+        self._candidate_track_height = None
+        self._candidate_track_mode = None
+        self._candidate_track_at = 0.0
 
     def __roi_focus_mask(self, bgr_img, label):
         alpha_mask = None
@@ -280,19 +295,13 @@ class detector:
         if self.evidence_dir:
             os.makedirs(self.evidence_dir, exist_ok=True)
 
-    def __save_periodic_evidence(self):
-        if not self.evidence_dir or self.input_img is None:
-            return
-        now = time.monotonic()
-        if now - self._last_evidence_save_at < float(self.evidence_interval_sec):
-            return
-        self._last_evidence_save_at = now
-        self._evidence_sequence += 1
-        stem = f"frame_{self._evidence_sequence:04d}_p{self.probability:.3f}"
+    def __write_evidence_snapshot(self, snapshot, stem):
         try:
-            annotated = self.input_img.copy()
-            if self.detected is not None and len(self.detected) >= 4:
-                x, y, width, height = (int(value) for value in self.detected[:4])
+            raw = snapshot["input"]
+            annotated = raw.copy()
+            bbox = snapshot.get("bbox")
+            if bbox is not None and len(bbox) >= 4:
+                x, y, width, height = (int(value) for value in bbox[:4])
                 cv2.rectangle(
                     annotated,
                     (x, y),
@@ -305,19 +314,79 @@ class detector:
                 annotated,
                 [int(cv2.IMWRITE_JPEG_QUALITY), 88],
             )
-            if self.binarized_img is not None:
+            cv2.imwrite(
+                os.path.join(self.evidence_dir, stem + "_raw.jpg"),
+                raw,
+                [int(cv2.IMWRITE_JPEG_QUALITY), 88],
+            )
+            if snapshot.get("mask") is not None:
                 cv2.imwrite(
                     os.path.join(self.evidence_dir, stem + "_mask.png"),
-                    self.binarized_img.astype(np.uint8),
+                    snapshot["mask"].astype(np.uint8),
                 )
-            if self.projected_img is not None:
+            if snapshot.get("roi") is not None:
                 cv2.imwrite(
                     os.path.join(self.evidence_dir, stem + "_roi.jpg"),
-                    self.projected_img.astype(np.uint8),
+                    snapshot["roi"].astype(np.uint8),
                     [int(cv2.IMWRITE_JPEG_QUALITY), 88],
                 )
         except Exception as exc:
             print(f"[Detector] Evidence save failed: {exc}")
+
+    def __save_periodic_evidence(self):
+        if not self.evidence_dir or self.input_img is None:
+            return
+        now = time.monotonic()
+        self._evidence_frame_sequence += 1
+        snapshot = {
+            "sequence": self._evidence_frame_sequence,
+            "input": self.input_img.copy(),
+            "mask": self.binarized_img.copy() if self.binarized_img is not None else None,
+            "roi": self.projected_img.copy() if self.projected_img is not None else None,
+            "bbox": list(self.detected) if self.detected is not None else None,
+            "probability": float(self.probability),
+        }
+        self._evidence_recent_frames.append(snapshot)
+
+        scores = dict(self.debug_scores or {})
+        candidate_event = bool(
+            int(scores.get("strict_red_ok", 0))
+            or (
+                float(scores.get("candidate_probability", 0.0)) >= self.strict_red_min_prob
+                and float(scores.get("cone_shape_score", 0.0)) >= self.strict_red_min_shape_score
+                and float(scores.get("hue_redness_score", 0.0)) >= self.relaxed_red_min_hue_score
+                and float(scores.get("sv_score", 0.0)) >= self.relaxed_red_min_sv_score
+            )
+        )
+        if (
+            candidate_event
+            and now - self._evidence_last_trigger_at >= self.evidence_burst_cooldown_sec
+        ):
+            self._evidence_last_trigger_at = now
+            self._evidence_burst_until = now + self.evidence_burst_duration_sec
+            for buffered in self._evidence_recent_frames:
+                sequence = int(buffered["sequence"])
+                if sequence in self._evidence_saved_sequences:
+                    continue
+                stem = (
+                    f"event_{sequence:06d}_"
+                    f"p{float(buffered['probability']):.3f}"
+                )
+                self.__write_evidence_snapshot(buffered, stem)
+                self._evidence_saved_sequences.add(sequence)
+
+        if now <= self._evidence_burst_until:
+            sequence = int(snapshot["sequence"])
+            if sequence not in self._evidence_saved_sequences:
+                stem = f"event_{sequence:06d}_p{self.probability:.3f}"
+                self.__write_evidence_snapshot(snapshot, stem)
+                self._evidence_saved_sequences.add(sequence)
+
+        if now - self._last_evidence_save_at >= float(self.evidence_interval_sec):
+            self._last_evidence_save_at = now
+            self._evidence_sequence += 1
+            stem = f"frame_{self._evidence_sequence:04d}_p{self.probability:.3f}"
+            self.__write_evidence_snapshot(snapshot, stem)
 
     def __get_camera_img(self):
         if self.picam2 is None and not self.__init_camera():
@@ -347,6 +416,7 @@ class detector:
         pre = self.__preprocess_for_red_mask(bgr_img)
         hsv = cv2.cvtColor(pre, cv2.COLOR_BGR2HSV)
         ycrcb = cv2.cvtColor(pre, cv2.COLOR_BGR2YCrCb)
+        lab = cv2.cvtColor(pre, cv2.COLOR_BGR2LAB)
 
         sat_min, val_min = self.__adaptive_sv_threshold(hsv)
         lo1 = np.array([0, sat_min, val_min], dtype=np.uint8)
@@ -366,7 +436,26 @@ class detector:
             cv2.inRange(hsv, np.array([0, 115, 60], dtype=np.uint8), np.array([12, 255, 255], dtype=np.uint8)),
             cv2.inRange(hsv, np.array([168, 115, 60], dtype=np.uint8), np.array([179, 255, 255], dtype=np.uint8)),
         )
-        fused = cv2.bitwise_or(cv2.bitwise_and(hsv_mask, ycrcb_mask), strict_hsv)
+        lab_a = lab[:, :, 1]
+        lab_a_min = int(max(142, np.percentile(lab_a, 82.0)))
+        lab_mask = cv2.inRange(lab_a, lab_a_min, 255)
+        chromatic_gate = cv2.inRange(
+            hsv,
+            np.array([0, max(45, sat_min - 30), val_min], dtype=np.uint8),
+            np.array([179, 255, 255], dtype=np.uint8),
+        )
+        lab_mask = cv2.bitwise_and(lab_mask, chromatic_gate)
+        color_consensus = cv2.bitwise_and(ycrcb_mask, lab_mask)
+        fused = cv2.bitwise_or(
+            cv2.bitwise_or(cv2.bitwise_and(hsv_mask, ycrcb_mask), strict_hsv),
+            color_consensus,
+        )
+        self._candidate_color_masks = {
+            "hsv": hsv_mask,
+            "ycrcb": ycrcb_mask,
+            "lab": lab_mask,
+            "color_fused": fused,
+        }
         return hsv, fused
 
     def __adaptive_sv_threshold(self, hsv_img):
@@ -525,6 +614,24 @@ class detector:
             denominator,
         )
 
+    @staticmethod
+    def __component_projection_support(projected_img, component):
+        if projected_img is None or component is None:
+            return 0.0
+        labels = component.get("labels")
+        label_idx = component.get("label_idx")
+        if labels is None or label_idx is None:
+            return 0.0
+        pixels = projected_img[labels == int(label_idx)]
+        if pixels.size <= 0:
+            return 0.0
+        # A high percentile is robust to grass cutting holes through an
+        # otherwise reference-like cone, while the mean prevents a single hot
+        # pixel from claiming full support.
+        mean_score = float(np.mean(pixels)) / 255.0
+        high_score = float(np.percentile(pixels, 75.0)) / 255.0
+        return float(max(0.0, min(0.55 * mean_score + 0.45 * high_score, 1.0)))
+
     def __postprocess_mask(self, mask):
         if mask is None:
             return None
@@ -628,7 +735,9 @@ class detector:
         bottom_width = self.__row_span_width(comp_crop, h * 0.70, h * 0.95)
         taper_raw = (bottom_width - top_width) / max(float(w), 1.0)
         taper_score_down = max(0.0, min((taper_raw + 0.05) / 0.45, 1.0))
-        # Camera may be mounted upside down. Evaluate the opposite taper as well.
+        # Grass can hide the base and close cones can be clipped by the top
+        # edge, so keep both taper directions as soft evidence rather than a
+        # hard orientation gate.
         taper_score_up = max(0.0, min(((-taper_raw) + 0.05) / 0.45, 1.0))
         taper_score = max(taper_score_down, taper_score_up)
 
@@ -656,14 +765,23 @@ class detector:
         slenderness = float(h) / max(float(w), 1.0)
         slender_tall_score = max(0.0, min((slenderness - 1.4) / 2.8, 1.0))
         taper_contrast_score = max(0.0, min(abs(taper_raw) / 0.45, 1.0))
+        partial_edge_score = 0.0
+        if (
+            y <= 1
+            and float(h) / max(float(self.camera_height), 1.0) >= 0.16
+            and float(w) / max(float(h), 1.0) <= 1.15
+            and extent >= 0.30
+        ):
+            partial_edge_score = 1.0
         cone_shape_score = (
-            0.26 * taper_score
-            + 0.22 * solidity
-            + 0.16 * max(0.0, min((extent - 0.16) / 0.46, 1.0))
-            + 0.12 * bottom_heavy_score
+            0.22 * taper_score
+            + 0.20 * solidity
+            + 0.15 * max(0.0, min((extent - 0.16) / 0.46, 1.0))
+            + 0.10 * bottom_heavy_score
             + 0.10 * vertex_score
-            + 0.09 * slender_tall_score
+            + 0.08 * slender_tall_score
             + 0.05 * taper_contrast_score
+            + 0.10 * partial_edge_score
         )
         return {
             "cone_shape_score": float(max(0.0, min(cone_shape_score, 1.0))),
@@ -678,6 +796,7 @@ class detector:
             "vertex_score": float(vertex_score),
             "slender_tall_score": float(slender_tall_score),
             "taper_contrast_score": float(taper_contrast_score),
+            "partial_edge_score": float(partial_edge_score),
         }
 
     def __component_color_metrics(self, hsv_img, labels, label_idx):
@@ -716,21 +835,38 @@ class detector:
             "hue_redness_score": hue_redness_score,
         }
 
-    def __component_metrics(self, mask, hsv_img=None, include_largest=False):
+    def __component_metrics(
+        self,
+        mask,
+        hsv_img=None,
+        include_largest=False,
+        return_candidates=False,
+        min_occupancy=None,
+    ):
         if mask is None:
+            if return_candidates:
+                return ([], None) if include_largest else []
             return (None, None) if include_largest else None
         mask_u8 = mask.astype(np.uint8)
         nlabels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_u8)
         if nlabels <= 1:
+            if return_candidates:
+                return ([], None) if include_largest else []
             return (None, None) if include_largest else None
 
         img_size = float(self.camera_width * self.camera_height)
+        occupancy_floor = float(
+            self.min_component_occupancy
+            if min_occupancy is None
+            else min_occupancy
+        )
         best = None
         largest = None
+        ranked = []
         for idx in range(1, nlabels):
             s = stats[idx]
             area = float(s[cv2.CC_STAT_AREA])
-            if area / img_size < self.min_component_occupancy:
+            if area / img_size < occupancy_floor:
                 continue
             w = max(1, int(s[cv2.CC_STAT_WIDTH]))
             h = max(1, int(s[cv2.CC_STAT_HEIGHT]))
@@ -843,13 +979,84 @@ class detector:
             }
             item.update(contour_metrics)
             item.update(color_metrics)
+            ranked.append(item)
             if best is None or item["score"] > best["score"]:
                 best = item
             if largest is None or item["area"] > largest["area"]:
                 largest = item
+        ranked.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        if return_candidates:
+            limited = ranked[: max(1, int(self.max_candidates_per_mode))]
+            return (limited, largest) if include_largest else limited
         if include_largest:
             return best, largest
         return best
+
+    def __proposal_is_eligible(self, component, support_ratio, mode_name):
+        if component is None:
+            return False
+        occupancy = float(component.get("occupancy", 0.0))
+        shape = float(component.get("cone_shape_score", 0.0))
+        hue = float(component.get("hue_redness_score", 0.0))
+        sv = float(component.get("sv_score", 0.0))
+        if mode_name in ("lab", "ycrcb"):
+            return bool(
+                float(support_ratio) >= 0.06
+                or (shape >= 0.32 and hue >= 0.45 and sv >= 0.20)
+            )
+        if mode_name == "backproj":
+            return bool(
+                float(support_ratio) >= 0.16
+                and shape >= 0.26
+                and hue >= 0.34
+                and sv >= 0.18
+            )
+        if occupancy >= self.min_component_occupancy:
+            return True
+        return bool(
+            mode_name == "hybrid_overlap"
+            or float(support_ratio) >= 0.10
+            or (shape >= 0.45 and hue >= 0.62 and sv >= 0.20)
+        )
+
+    @staticmethod
+    def __candidate_mode_score(component, support_ratio, mode_name):
+        if component is None:
+            return -1.0
+        score = float(component.get("score", 0.0))
+        score += 0.20 * max(0.0, min(float(support_ratio), 1.0))
+        if mode_name == "hybrid_overlap":
+            score += 0.12
+        elif mode_name == "hue":
+            score += 0.06
+        elif mode_name in ("lab", "ycrcb"):
+            score -= 0.03
+        elif mode_name == "backproj":
+            score -= 0.08
+        if float(component.get("occupancy", 0.0)) < 0.001:
+            score -= 0.04
+        return float(score)
+
+    def __candidate_temporal_bonus(self, component, mode_name, now):
+        last_direction = self._candidate_track_direction
+        if last_direction is None or now - float(self._candidate_track_at) > 1.0:
+            return 0.0
+        centroid = component.get("centroid") or [self.camera_width * 0.5, 0]
+        direction = float(centroid[0]) / max(float(self.camera_width), 1.0)
+        direction_error = abs(direction - float(last_direction))
+        bonus = 0.12 * max(0.0, 1.0 - direction_error / 0.48)
+        last_height = self._candidate_track_height
+        current_height = float((component.get("bbox") or [0, 0, 0, 0])[3])
+        if last_height and current_height > 0.0:
+            ratio = max(
+                float(last_height) / current_height,
+                current_height / float(last_height),
+            )
+            if ratio <= 2.5:
+                bonus += 0.04 * max(0.0, 1.0 - (ratio - 1.0) / 1.5)
+        if mode_name == self._candidate_track_mode:
+            bonus += 0.02
+        return float(bonus)
 
     def __largest_component_metrics(self, mask, hsv_img=None):
         if mask is None:
@@ -1100,22 +1307,108 @@ class detector:
 
         red_mask = self.__postprocess_mask(red_mask_raw)
         bp_mask = self.__postprocess_mask(bp_mask_raw) if bp_mask_raw is not None else None
-        roi_support_ratio = 0.0
-        # ROI backprojection validates an HSV-red component; it must not create
-        # a competing component that can displace the visually stable cone.
-        best_mode = "hue"
-        best_mask = red_mask
-        best_component, dominant_red_component = self.__component_metrics(
+        processed_color_masks = {
+            name: self.__postprocess_mask(mask)
+            for name, mask in dict(self._candidate_color_masks or {}).items()
+            if mask is not None
+        }
+        processed_color_masks["hue"] = red_mask
+        mode_masks = [("hue", red_mask)]
+        for mode_name in ("ycrcb", "lab"):
+            mode_mask = processed_color_masks.get(mode_name)
+            if mode_mask is not None:
+                mode_masks.append((mode_name, mode_mask))
+        if bp_mask is not None:
+            overlap = self.__postprocess_mask(cv2.bitwise_and(red_mask, bp_mask))
+            mode_masks.extend(
+                [
+                    ("hybrid_overlap", overlap),
+                    ("backproj", bp_mask),
+                ]
+            )
+
+        red_candidates, dominant_red_component = self.__component_metrics(
             red_mask,
             hsv_img=hsv,
             include_largest=True,
+            return_candidates=True,
+            min_occupancy=self.proposal_min_component_occupancy,
         )
-
-        roi_support_ratio = self.__component_roi_support(
-            red_mask,
-            bp_mask,
-            best_component,
+        proposed = []
+        candidate_now = time.monotonic()
+        for mode_name, mode_mask in mode_masks:
+            components = red_candidates if mode_name == "hue" else (
+                self.__component_metrics(
+                    mode_mask,
+                    hsv_img=hsv,
+                    return_candidates=True,
+                    min_occupancy=self.proposal_min_component_occupancy,
+                )
+            )
+            for component in components:
+                if mode_name == "backproj":
+                    support_ratio = self.__component_projection_support(
+                        proj,
+                        component,
+                    )
+                else:
+                    support_ratio = self.__component_roi_support(
+                        mode_mask,
+                        bp_mask,
+                        component,
+                    )
+                if not self.__proposal_is_eligible(
+                    component,
+                    support_ratio,
+                    mode_name,
+                ):
+                    continue
+                temporal_bonus = self.__candidate_temporal_bonus(
+                    component,
+                    mode_name,
+                    candidate_now,
+                )
+                proposed.append(
+                    {
+                        "mode": mode_name,
+                        "mask": mode_mask,
+                        "component": component,
+                        "support": support_ratio,
+                        "temporal_bonus": temporal_bonus,
+                        "selection_score": (
+                            self.__candidate_mode_score(
+                                component,
+                                support_ratio,
+                                mode_name,
+                            )
+                            + temporal_bonus
+                        ),
+                    }
+                )
+        proposed.sort(
+            key=lambda item: float(item["selection_score"]),
+            reverse=True,
         )
+        selected = proposed[0] if proposed else None
+        best_mode = selected["mode"] if selected is not None else "hue"
+        best_mask = selected["mask"] if selected is not None else red_mask
+        best_component = selected["component"] if selected is not None else None
+        roi_support_ratio = float(selected["support"]) if selected is not None else 0.0
+        candidate_count = len(proposed)
+        candidate_rank = 1 if selected is not None else 0
+        candidate_temporal_bonus = (
+            float(selected["temporal_bonus"]) if selected is not None else 0.0
+        )
+        if selected is not None:
+            selected_centroid = best_component.get("centroid") or [self.camera_width * 0.5, 0]
+            selected_bbox = best_component.get("bbox") or [0, 0, 0, 0]
+            self._candidate_track_direction = float(selected_centroid[0]) / max(
+                float(self.camera_width),
+                1.0,
+            )
+            self._candidate_track_height = float(selected_bbox[3])
+            self._candidate_track_mode = best_mode
+            self._candidate_track_at = candidate_now
 
         reached, frame_red_occupancy, edge_touch = self.__close_range_reached(red_mask)
         dominant_red = None
@@ -1288,7 +1581,13 @@ class detector:
             sv_score = float(best_component.get("sv_score", 0.0))
             bbox_top_frac = float(top) / float(self.camera_height)
             bbox_bottom_frac = float(top + height) / float(self.camera_height)
-            if bbox_top_frac < 0.22 and width_frac > 0.38 and aspect > 1.10 and cone_shape_score < 0.62:
+            if (
+                bbox_top_frac < 0.22
+                and width_frac > 0.38
+                and aspect > 1.10
+                and cone_shape_score < 0.62
+                and roi_support_ratio < 0.10
+            ):
                 prob *= 0.45
                 penalty_flags.append("wide_upper_x0.45")
             if (
@@ -1297,6 +1596,7 @@ class detector:
                 and width_frac > self.upper_sky_reject_width_frac
                 and height_frac < 0.55
                 and cone_shape_score < 0.72
+                and roi_support_ratio < 0.10
             ):
                 prob *= 0.18
                 penalty_flags.append("upper_sky_x0.18")
@@ -1430,6 +1730,9 @@ class detector:
             "overall_score": overall_score,
             "edge_touch_count": edge_touch,
             "roi_support_ratio": roi_support_ratio,
+            "candidate_count": candidate_count,
+            "candidate_rank": candidate_rank,
+            "candidate_temporal_bonus": candidate_temporal_bonus,
             "legacy_prob": legacy_prob,
             "candidate_probability": candidate_probability,
             "pre_filter_probability": pre_filter_probability,
@@ -1443,6 +1746,8 @@ class detector:
             "ground_penalty": ground_penalty,
             "penalty_flags": "|".join(penalty_flags),
             "roi_hist_available": self.__roi_hist is not None,
+            "image_direction": float(cone_dir),
+            "image_direction_valid": int(best_component is not None),
         }
         if best_component is not None:
             result.update(best_component)
@@ -1547,6 +1852,13 @@ class detector:
             "occ": float(best.get("occupancy", 0.0)),
             "edge_touch": float(best.get("edge_touch_count", 0.0)),
             "roi_support": float(best.get("roi_support_ratio", 0.0)),
+            "image_direction": float(best.get("image_direction", 0.5)),
+            "image_direction_valid": int(best.get("image_direction_valid", 0)),
+            "candidate_count": int(best.get("candidate_count", 0)),
+            "candidate_rank": int(best.get("candidate_rank", 0)),
+            "candidate_temporal_bonus": float(
+                best.get("candidate_temporal_bonus", 0.0)
+            ),
             "shape_score": float(best.get("shape_score", 0.0)),
             "cone_shape_score": float(best.get("cone_shape_score", 0.0)),
             "sv_score": float(best.get("sv_score", 0.0)),

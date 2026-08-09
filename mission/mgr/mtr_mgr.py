@@ -5,8 +5,14 @@ from mission.const import (
     APPROACH_TURN_GAIN,
     BASE_SPEED,
     CAMERA_FRAME_STALE_STOP_SEC,
+    CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
+    CAMERA_WEAK_MIN_HUE_SCORE,
+    CAMERA_WEAK_MIN_ROI_SUPPORT,
+    CAMERA_WEAK_MIN_SHAPE_SCORE,
+    CAMERA_WEAK_MIN_SV_SCORE,
     CONE_CENTER_POSITION,
     CONE_PROBABILITY_THRESHOLD,
+    CONE_PROBABILITY_THRESHOLD_PHASE4,
     CONE_PROBABILITY_THRESHOLD_PHASE5,
     DEVICE_MOTOR_1_DIR,
     DEVICE_MOTOR_1_PWM,
@@ -35,6 +41,9 @@ from mission.const import (
     PHASE4_ALIGN_INNER_SPEED,
     PHASE4_ALIGN_PIVOT_SPEED,
     PHASE4_ALIGN_STOP_DEADBAND,
+    PHASE4_CANDIDATE_INNER_SPEED,
+    PHASE4_CANDIDATE_CAPTURE_SEC,
+    PHASE4_CANDIDATE_OUTER_SPEED,
     PHASE4_MOTOR_RAMP_TIME,
     PHASE4_REACQUIRE_TURN_SEC,
     PHASE45_CONE_DIR_FILTER_ALPHA,
@@ -496,6 +505,8 @@ class MotorManager:
             else None
         )
         self.phase4_last_candidate_dir = last_candidate
+        self.phase4_candidate_active_until = 0.0
+        self.phase4_motor_candidate_seq = 0
 
     @staticmethod
     def _snapshot_float(snapshot, key, default=0.0):
@@ -535,6 +546,68 @@ class MotorManager:
         )
         return True
 
+    def _drive_phase4_candidate_capture(self):
+        """Slowly hold a candidate in view without the pitch caused by 0/0."""
+        last_dir = getattr(self, "phase4_last_candidate_dir", None)
+        try:
+            error = float(last_dir) - CONE_CENTER_POSITION
+        except (TypeError, ValueError):
+            return False
+        if abs(error) <= float(PHASE4_ALIGN_STOP_DEADBAND):
+            self.set_motors(
+                PHASE4_CANDIDATE_INNER_SPEED,
+                True,
+                PHASE4_CANDIDATE_INNER_SPEED,
+                True,
+                ramp_time=PHASE4_MOTOR_RAMP_TIME,
+                cmd_type="phase4_candidate_capture_forward",
+            )
+            return True
+        turn_side = "right" if error > 0.0 else "left"
+        self._set_forward_pivot_turn(
+            turn_side,
+            PHASE4_CANDIDATE_OUTER_SPEED,
+            cmd_type="phase4_candidate_capture_arc",
+            speed_inner=PHASE4_CANDIDATE_INNER_SPEED,
+            ramp_time=PHASE4_MOTOR_RAMP_TIME,
+        )
+        return True
+
+    def _phase4_new_snapshot_candidate(self, snapshot, now):
+        sequence = int(self._snapshot_float(snapshot, "cone_sequence", 0.0))
+        if sequence <= int(getattr(self, "phase4_motor_candidate_seq", 0)):
+            return False
+        self.phase4_motor_candidate_seq = sequence
+        debug = dict(snapshot.get("cone_debug", {}) or {})
+        probability = self._snapshot_float(snapshot, "cone_probability", 0.0)
+        strict = bool(int(self._snapshot_float(debug, "strict_red_ok", 0.0))) and (
+            probability > float(CONE_PROBABILITY_THRESHOLD_PHASE4)
+        )
+        weak = bool(
+            self._snapshot_float(debug, "candidate_probability", 0.0)
+            >= CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY
+            and self._snapshot_float(debug, "cone_shape_score", 0.0)
+            >= CAMERA_WEAK_MIN_SHAPE_SCORE
+            and self._snapshot_float(debug, "hue_redness_score", 0.0)
+            >= CAMERA_WEAK_MIN_HUE_SCORE
+            and self._snapshot_float(debug, "sv_score", 0.0)
+            >= CAMERA_WEAK_MIN_SV_SCORE
+            and self._snapshot_float(debug, "roi_support_ratio", 0.0)
+            >= CAMERA_WEAK_MIN_ROI_SUPPORT
+        )
+        if not (strict or weak):
+            return False
+        self.phase4_last_candidate_dir = self._snapshot_float(
+            snapshot,
+            "cone_direction",
+            CONE_CENTER_POSITION,
+        )
+        self.phase4_candidate_active_until = float(now) + float(
+            PHASE4_CANDIDATE_CAPTURE_SEC
+        )
+        self.phase4_search_state = "capture"
+        return True
+
     def _update_phase45_filtered_cone_dir(self, raw_cone_direction, cone_seen):
         if not cone_seen:
             return getattr(self, "phase45_filtered_cone_dir", None)
@@ -567,15 +640,22 @@ class MotorManager:
         if not self._camera_observation_fresh(snapshot, now):
             self.stop_motors()
             return
+        self._phase4_new_snapshot_candidate(snapshot, now)
         state = getattr(self, "phase4_search_state", "drive")
+        if state == "capture":
+            capture_until = float(
+                getattr(self, "phase4_candidate_active_until", now) or now
+            )
+            if now < capture_until and self._drive_phase4_candidate_capture():
+                return
+            self.phase4_search_state = "drive"
         if state == "reacquire":
             reacquire_until = getattr(self, "phase4_reacquire_until", now)
             if now < float(reacquire_until) and self._drive_phase4_toward_last_candidate():
                 return
             self.phase4_search_state = "drive"
 
-        # A single unconfirmed frame must not alter motion.  Phase4 confirms
-        # distinct sequences while this established counter-clockwise arc runs.
+        # With no candidate, preserve the established counter-clockwise arc.
         self.phase4_search_state = "drive"
         self._set_forward_pivot_turn(
             "left",
