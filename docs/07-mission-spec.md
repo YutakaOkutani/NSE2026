@@ -59,6 +59,7 @@ Current numeric thresholds, pins, speeds, and budgets are authoritative in `miss
 - Keep detector acquisition/normalization in the sensor/vision layer and mission interpretation in the Phase.
 - Require short-term consistency for P4 detection; a weak single frame must not transition.
 - Keep the P4 search arc continuous while the camera is fresh; an abrupt observation stop changes the camera pitch on this airframe.
+- Keep the camera detector and capture pipeline inactive throughout P0-P3. Activate them only on entry to P4/P5, and release them whenever the mission returns to a non-vision phase; a camera disconnect before P4 must not affect navigation or motor control.
 - Compensate P4 candidate direction with heading when available and reject discontinuous vertical position or scale before confirmation.
 - In P5, reset reach confirmation on non-reached evidence.
 - Distinguish cone loss (`P5 -> P4`) from a P4 timeout or exhausted camera recovery (`P4 -> P7`).

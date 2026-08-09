@@ -150,7 +150,7 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         }
         ctrl.st.update_imu(angle=100.0, angle_valid=True)
         ctrl.update_cone_frame(
-            direction=0.75,
+            direction=0.25,
             probability=0.40,
             debug=first_debug,
         )
@@ -159,12 +159,22 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
 
         ctrl.st.update_imu(angle=81.4, angle_valid=True)
         ctrl.update_cone_frame(
-            direction=0.45,
+            direction=0.55,
             probability=0.40,
             observation_time=100.6,
             debug={**first_debug, "bbox_x": 337},
         )
         with patch("mission.phases.p4.time.time", return_value=100.6):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        ctrl.st.update_imu(angle=80.7, angle_valid=True)
+        ctrl.update_cone_frame(
+            direction=0.56,
+            probability=0.41,
+            observation_time=100.8,
+            debug={**first_debug, "bbox_x": 343},
+        )
+        with patch("mission.phases.p4.time.time", return_value=100.8):
             Phase4Handler().execute(ctrl, ctrl.st.snapshot())
 
         self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
@@ -223,6 +233,53 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         self.assertEqual(ctrl.phase4_detect_confirm_count, 0)
         self.assertEqual(ctrl.cone_phase_decision, "p4_low_confidence_hold")
 
+    def test_phase4_tiny_strict_score_is_not_a_single_frame_detection(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        ctrl.update_cone_frame(
+            direction=0.50,
+            probability=0.80,
+            debug={"strict_red_ok": 1, "occupancy": 0.001},
+        )
+
+        with patch("mission.phases.p4.time.time", return_value=100.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.phase4_detect_confirm_count, 0)
+        self.assertFalse(ctrl.cone_phase_detected)
+
+    def test_phase4_tiny_candidate_does_not_replace_large_live_track(self):
+        ctrl = _VisionController(Phase.PHASE4)
+        ctrl.update_cone_frame(
+            direction=0.45,
+            probability=0.35,
+            debug={"strict_red_ok": 1, "occupancy": 0.02},
+        )
+        with patch("mission.phases.p4.time.time", return_value=100.0):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        original_signature = dict(ctrl.phase4_detect_track_signature)
+        ctrl.update_cone_frame(
+            direction=0.80,
+            probability=0.17,
+            observation_time=100.2,
+            debug={
+                "strict_red_ok": 0,
+                "occupancy": 0.001,
+                "candidate_probability": 0.75,
+                "cone_shape_score": 0.75,
+                "hue_redness_score": 0.80,
+                "sv_score": 0.70,
+                "roi_support_ratio": 0.50,
+                "roi_absolute_support": 0.20,
+            },
+        )
+        with patch("mission.phases.p4.time.time", return_value=100.2):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.phase4_detect_track_signature, original_signature)
+        self.assertEqual(ctrl.phase4_detect_confirm_count, 1)
+        self.assertTrue(ctrl.cone_phase_decision.startswith("p4_track_hold_"))
+
     def test_phase4_records_reached_signal_rejected_by_probability_gate(self):
         ctrl = _VisionController(Phase.PHASE4)
         ctrl.update_cone_frame(direction=0.50, probability=0.08, reached=True)
@@ -260,6 +317,11 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
 
         ctrl.update_cone_frame(direction=0.51, probability=0.31, observation_time=100.1)
         with patch("mission.phases.p4.time.time", return_value=100.1):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE4))
+        ctrl.update_cone_frame(direction=0.50, probability=0.32, observation_time=100.2)
+        with patch("mission.phases.p4.time.time", return_value=100.2):
             Phase4Handler().execute(ctrl, ctrl.st.snapshot())
 
         self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
@@ -358,6 +420,29 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
             },
         )
         with patch("mission.phases.p4.time.time", return_value=100.21):
+            Phase4Handler().execute(ctrl, ctrl.st.snapshot())
+
+        ctrl.update_cone_frame(
+            direction=0.36,
+            probability=0.17,
+            observation_time=100.42,
+            debug={
+                "strict_red_ok": 0,
+                "candidate_probability": 0.50,
+                "cone_shape_score": 0.84,
+                "hue_redness_score": 0.56,
+                "sv_score": 0.90,
+                "roi_support_ratio": 0.31,
+                "bbox_x": 356,
+                "bbox_y": 0,
+                "bbox_width": 106,
+                "bbox_height": 232,
+                "bbox_width_frac": 106 / 640,
+                "bbox_height_frac": 232 / 480,
+                "bbox_bottom_frac": 232 / 480,
+            },
+        )
+        with patch("mission.phases.p4.time.time", return_value=100.42):
             Phase4Handler().execute(ctrl, ctrl.st.snapshot())
 
         self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))

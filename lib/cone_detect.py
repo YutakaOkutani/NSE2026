@@ -1,5 +1,7 @@
 # encoding: utf-8
 import os
+import queue
+import threading
 import time
 from collections import deque
 
@@ -18,8 +20,12 @@ class detector:
         self.ratio_thresh = 0.12
         self.min_component_occupancy = 0.001
         self.proposal_min_component_occupancy = 0.00018
-        self.max_candidates_per_mode = 5
+        self.max_candidates_per_mode = 3
+        self.max_component_proposals_per_mode = 12
+        self.max_total_ranked_candidates = 8
         self.backproj_rescue_min_occupancy = 0.006
+        self.tiny_component_occupancy = 0.003
+        self.tiny_single_frame_probability_cap = 0.17
 
         # Goal (close contact) judgment: screen should be mostly red and touching edges
         # Goal判定はやや厳しめにする（近距離で画面を大きく占有していること）
@@ -50,6 +56,8 @@ class detector:
         self._evidence_last_trigger_at = 0.0
         self._evidence_saved_sequences = set()
         self._evidence_recent_frames = deque(maxlen=6)
+        self._evidence_write_queue = queue.Queue(maxsize=6)
+        self._evidence_writer_thread = None
         self.evidence_burst_duration_sec = 1.0
         self.evidence_burst_cooldown_sec = 1.5
 
@@ -62,6 +70,7 @@ class detector:
         self.capture_retry_sleep = 0.2
         self.last_capture_error = None
         self.roi_backproj_scale = 0.5
+        self.roi_backproj_absolute_threshold = 32
         self.backproj_dilate_kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
             (7, 7),
@@ -70,6 +79,7 @@ class detector:
         # ROI histogram (None = default red mode)
         self.__roi_hist = None
         self.__roi_hist_negative = None
+        self._last_negative_projection = None
         self.roi_positive_count = 0
         self.roi_negative_count = 0
         self.roi_positive_weight = 0.0
@@ -140,6 +150,7 @@ class detector:
         self._candidate_color_masks = {}
         self._candidate_track_direction = None
         self._candidate_track_height = None
+        self._candidate_track_occupancy = None
         self._candidate_track_mode = None
         self._candidate_track_at = 0.0
 
@@ -333,6 +344,31 @@ class detector:
         except Exception as exc:
             print(f"[Detector] Evidence save failed: {exc}")
 
+    def __evidence_writer_loop(self):
+        while True:
+            item = self._evidence_write_queue.get()
+            try:
+                if item is None:
+                    return
+                snapshot, stem = item
+                self.__write_evidence_snapshot(snapshot, stem)
+            finally:
+                self._evidence_write_queue.task_done()
+
+    def __queue_evidence_snapshot(self, snapshot, stem):
+        if self._evidence_writer_thread is None or not self._evidence_writer_thread.is_alive():
+            self._evidence_writer_thread = threading.Thread(
+                target=self.__evidence_writer_loop,
+                name="cone-evidence-writer",
+                daemon=True,
+            )
+            self._evidence_writer_thread.start()
+        try:
+            self._evidence_write_queue.put_nowait((snapshot, stem))
+        except queue.Full:
+            # Camera throughput has priority over diagnostic image completeness.
+            pass
+
     def __save_periodic_evidence(self):
         if not self.evidence_dir or self.input_img is None:
             return
@@ -372,21 +408,23 @@ class detector:
                     f"event_{sequence:06d}_"
                     f"p{float(buffered['probability']):.3f}"
                 )
-                self.__write_evidence_snapshot(buffered, stem)
+                self.__queue_evidence_snapshot(buffered, stem)
                 self._evidence_saved_sequences.add(sequence)
 
         if now <= self._evidence_burst_until:
             sequence = int(snapshot["sequence"])
             if sequence not in self._evidence_saved_sequences:
                 stem = f"event_{sequence:06d}_p{self.probability:.3f}"
-                self.__write_evidence_snapshot(snapshot, stem)
+                self.__queue_evidence_snapshot(snapshot, stem)
                 self._evidence_saved_sequences.add(sequence)
 
         if now - self._last_evidence_save_at >= float(self.evidence_interval_sec):
             self._last_evidence_save_at = now
             self._evidence_sequence += 1
             stem = f"frame_{self._evidence_sequence:04d}_p{self.probability:.3f}"
-            self.__write_evidence_snapshot(snapshot, stem)
+            periodic_snapshot = dict(snapshot)
+            periodic_snapshot["roi"] = None
+            self.__queue_evidence_snapshot(periodic_snapshot, stem)
 
     def __get_camera_img(self):
         if self.picam2 is None and not self.__init_camera():
@@ -509,6 +547,7 @@ class detector:
 
     def __back_projection_mask(self, hsv_img):
         if self.__roi_hist is None:
+            self._last_negative_projection = None
             return None, None
         scale = max(0.25, min(float(self.roi_backproj_scale), 1.0))
         if scale < 1.0:
@@ -529,6 +568,7 @@ class detector:
             1,
         ).astype(np.float32)
         proj = proj_pos
+        proj_neg = None
         if self.__roi_hist_negative is not None:
             proj_neg = cv2.calcBackProject(
                 [work_hsv],
@@ -539,20 +579,24 @@ class detector:
             ).astype(np.float32)
             proj = cv2.max(proj_pos - (self.negative_backproj_scale * proj_neg), 0.0)
         proj = cv2.GaussianBlur(proj, (5, 5), 0)
-        proj_u8 = cv2.normalize(proj, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # Preserve the calibrated histogram scale. Per-frame min/max
+        # normalization made arbitrary grass residuals look like perfect ROI
+        # matches whenever a frame contained no strong positive reference.
+        proj_u8 = np.clip(proj, 0.0, 255.0).astype(np.uint8)
+        negative_u8 = None
+        if proj_neg is not None:
+            negative_u8 = np.clip(
+                cv2.GaussianBlur(proj_neg, (5, 5), 0),
+                0.0,
+                255.0,
+            ).astype(np.uint8)
 
-        # If ROI backprojection is too weak, inject a conservative hue prior.
-        p99 = float(np.percentile(proj_u8, 99.0)) if proj_u8.size > 0 else 0.0
-        if p99 < 30.0:
-            hue_prior = None
-            for lo, hi in self.default_hsv_ranges:
-                part = cv2.inRange(work_hsv, lo, hi)
-                hue_prior = part if hue_prior is None else cv2.bitwise_or(hue_prior, part)
-            if hue_prior is not None:
-                hue_prior = cv2.GaussianBlur(hue_prior, (7, 7), 0)
-                proj_u8 = cv2.max(proj_u8, (hue_prior.astype(np.float32) * 0.25).astype(np.uint8))
-
-        _, bp_bin = cv2.threshold(proj_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, bp_bin = cv2.threshold(
+            proj_u8,
+            int(self.roi_backproj_absolute_threshold),
+            255,
+            cv2.THRESH_BINARY,
+        )
         bp_bin = cv2.morphologyEx(bp_bin, cv2.MORPH_DILATE, self.backproj_dilate_kernel)
         if work_hsv is not hsv_img:
             output_size = (int(hsv_img.shape[1]), int(hsv_img.shape[0]))
@@ -566,6 +610,13 @@ class detector:
                 output_size,
                 interpolation=cv2.INTER_NEAREST,
             )
+            if negative_u8 is not None:
+                negative_u8 = cv2.resize(
+                    negative_u8,
+                    output_size,
+                    interpolation=cv2.INTER_LINEAR,
+                )
+        self._last_negative_projection = negative_u8
         return proj_u8, bp_bin
 
     @staticmethod
@@ -863,7 +914,21 @@ class detector:
         best = None
         largest = None
         ranked = []
-        for idx in range(1, nlabels):
+        # Connected-component statistics are cheap; contour and per-pixel color
+        # scoring are not. Rank coarse proposals by area before expensive work.
+        proposal_indices = [
+            idx
+            for idx in range(1, nlabels)
+            if float(stats[idx, cv2.CC_STAT_AREA]) / img_size >= occupancy_floor
+        ]
+        proposal_indices.sort(
+            key=lambda idx: float(stats[idx, cv2.CC_STAT_AREA]),
+            reverse=True,
+        )
+        proposal_indices = proposal_indices[
+            : max(1, int(self.max_component_proposals_per_mode))
+        ]
+        for idx in proposal_indices:
             s = stats[idx]
             area = float(s[cv2.CC_STAT_AREA])
             if area / img_size < occupancy_floor:
@@ -946,9 +1011,10 @@ class detector:
             ):
                 # Strongly suppress grass/branches and brownish blobs that pass hue threshold loosely.
                 score *= 0.72
-            # Far cone rescue: allow small but very cone-like red silhouettes to survive strict penalties.
+            # Far-cone rescue is limited to components above the field-derived
+            # grass/cone size boundary. Smaller components need temporal proof.
             if (
-                occ < 0.035
+                self.tiny_component_occupancy <= occ < 0.035
                 and cone_shape_score >= 0.55
                 and hue_redness_score >= 0.68
                 and sv_score >= 0.24
@@ -1001,8 +1067,11 @@ class detector:
         sv = float(component.get("sv_score", 0.0))
         if mode_name in ("lab", "ycrcb"):
             return bool(
-                float(support_ratio) >= 0.06
-                or (shape >= 0.32 and hue >= 0.45 and sv >= 0.20)
+                occupancy >= self.tiny_component_occupancy
+                and (
+                    float(support_ratio) >= 0.06
+                    or (shape >= 0.32 and hue >= 0.45 and sv >= 0.20)
+                )
             )
         if mode_name == "backproj":
             return bool(
@@ -1014,8 +1083,7 @@ class detector:
         if occupancy >= self.min_component_occupancy:
             return True
         return bool(
-            mode_name == "hybrid_overlap"
-            or float(support_ratio) >= 0.10
+            float(support_ratio) >= 0.10
             or (shape >= 0.45 and hue >= 0.62 and sv >= 0.20)
         )
 
@@ -1036,6 +1104,35 @@ class detector:
         if float(component.get("occupancy", 0.0)) < 0.001:
             score -= 0.04
         return float(score)
+
+    @staticmethod
+    def __matching_parent_component(component, parents):
+        """Find the hue component containing most of a derived hybrid blob."""
+        if component is None:
+            return None
+        bbox = component.get("bbox") or [0, 0, 0, 0]
+        if len(bbox) < 4:
+            return None
+        x0, y0, width, height = (float(value) for value in bbox[:4])
+        x1, y1 = x0 + width, y0 + height
+        best = None
+        best_overlap = 0.0
+        for parent in parents or []:
+            parent_bbox = parent.get("bbox") or [0, 0, 0, 0]
+            if len(parent_bbox) < 4:
+                continue
+            px0, py0, pwidth, pheight = (
+                float(value) for value in parent_bbox[:4]
+            )
+            px1, py1 = px0 + pwidth, py0 + pheight
+            overlap = max(0.0, min(x1, px1) - max(x0, px0)) * max(
+                0.0,
+                min(y1, py1) - max(y0, py0),
+            )
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best = parent
+        return best
 
     def __candidate_temporal_bonus(self, component, mode_name, now):
         last_direction = self._candidate_track_direction
@@ -1169,6 +1266,9 @@ class detector:
         bbox = component.get("bbox") or [0, 0, 0, 0]
         bbox_bottom_frac = float((bbox[1] + bbox[3]) / float(self.camera_height)) if self.camera_height > 0 else 0.0
         aspect = float(component.get("aspect", 0.0))
+        occupancy = float(component.get("occupancy", 0.0))
+        if 0.0 < occupancy < self.tiny_component_occupancy:
+            return "tiny_single_frame"
         if hue < self.strict_red_min_hue_score:
             return "hue_below_min"
         if sv < self.strict_red_min_sv_score:
@@ -1224,7 +1324,9 @@ class detector:
         eligible = bool(
             strict_red_ok
             and bbox_bottom_frac >= 0.55
-            and occupancy < 0.045
+            and float(getattr(self, "tiny_component_occupancy", 0.003))
+            <= occupancy
+            < 0.045
             and cone_shape_score >= 0.55
             and hue_redness_score >= 0.62
             and sv_score >= 0.24
@@ -1303,30 +1405,7 @@ class detector:
 
     def __build_candidate(self, bgr_img, variant_name):
         hsv, red_mask_raw = self.__red_mask(bgr_img)
-        proj, bp_mask_raw = self.__back_projection_mask(hsv)
-
         red_mask = self.__postprocess_mask(red_mask_raw)
-        bp_mask = self.__postprocess_mask(bp_mask_raw) if bp_mask_raw is not None else None
-        processed_color_masks = {
-            name: self.__postprocess_mask(mask)
-            for name, mask in dict(self._candidate_color_masks or {}).items()
-            if mask is not None
-        }
-        processed_color_masks["hue"] = red_mask
-        mode_masks = [("hue", red_mask)]
-        for mode_name in ("ycrcb", "lab"):
-            mode_mask = processed_color_masks.get(mode_name)
-            if mode_mask is not None:
-                mode_masks.append((mode_name, mode_mask))
-        if bp_mask is not None:
-            overlap = self.__postprocess_mask(cv2.bitwise_and(red_mask, bp_mask))
-            mode_masks.extend(
-                [
-                    ("hybrid_overlap", overlap),
-                    ("backproj", bp_mask),
-                ]
-            )
-
         red_candidates, dominant_red_component = self.__component_metrics(
             red_mask,
             hsv_img=hsv,
@@ -1334,18 +1413,23 @@ class detector:
             return_candidates=True,
             min_occupancy=self.proposal_min_component_occupancy,
         )
+        proj, bp_mask_raw = self.__back_projection_mask(hsv)
+        bp_mask = (
+            self.__postprocess_mask(bp_mask_raw)
+            if bp_mask_raw is not None
+            else None
+        )
         proposed = []
         candidate_now = time.monotonic()
-        for mode_name, mode_mask in mode_masks:
-            components = red_candidates if mode_name == "hue" else (
-                self.__component_metrics(
-                    mode_mask,
-                    hsv_img=hsv,
-                    return_candidates=True,
-                    min_occupancy=self.proposal_min_component_occupancy,
-                )
-            )
+
+        def add_mode_candidates(mode_name, mode_mask, components):
             for component in components:
+                support_component = component
+                if mode_name == "hybrid_overlap":
+                    support_component = (
+                        self.__matching_parent_component(component, red_candidates)
+                        or component
+                    )
                 if mode_name == "backproj":
                     support_ratio = self.__component_projection_support(
                         proj,
@@ -1353,10 +1437,18 @@ class detector:
                     )
                 else:
                     support_ratio = self.__component_roi_support(
-                        mode_mask,
+                        red_mask,
                         bp_mask,
-                        component,
+                        support_component,
                     )
+                absolute_support = self.__component_projection_support(
+                    proj,
+                    support_component,
+                )
+                negative_support = self.__component_projection_support(
+                    self._last_negative_projection,
+                    support_component,
+                )
                 if not self.__proposal_is_eligible(
                     component,
                     support_ratio,
@@ -1374,6 +1466,8 @@ class detector:
                         "mask": mode_mask,
                         "component": component,
                         "support": support_ratio,
+                        "absolute_support": absolute_support,
+                        "negative_support": negative_support,
                         "temporal_bonus": temporal_bonus,
                         "selection_score": (
                             self.__candidate_mode_score(
@@ -1382,18 +1476,94 @@ class detector:
                                 mode_name,
                             )
                             + temporal_bonus
+                            + 0.12 * absolute_support
+                            - 0.18 * negative_support
                         ),
                     }
                 )
+
+        # Hue is the cheapest and most reliable primary path. Expensive Lab,
+        # YCrCb and backprojection component searches are a fallback cascade.
+        add_mode_candidates("hue", red_mask, red_candidates)
+        primary_credible = any(
+            float(item["component"].get("occupancy", 0.0))
+            >= self.tiny_component_occupancy
+            and float(item["component"].get("cone_shape_score", 0.0)) >= 0.42
+            and float(item["component"].get("hue_redness_score", 0.0)) >= 0.45
+            and float(item["component"].get("sv_score", 0.0)) >= 0.20
+            for item in proposed
+        )
+        if not primary_credible:
+            for mode_name in ("ycrcb", "lab"):
+                raw_mode_mask = dict(self._candidate_color_masks or {}).get(mode_name)
+                if raw_mode_mask is None:
+                    continue
+                mode_mask = self.__postprocess_mask(raw_mode_mask)
+                components = self.__component_metrics(
+                    mode_mask,
+                    hsv_img=hsv,
+                    return_candidates=True,
+                    min_occupancy=self.proposal_min_component_occupancy,
+                )
+                add_mode_candidates(mode_name, mode_mask, components)
+            if bp_mask is not None:
+                overlap = self.__postprocess_mask(
+                    cv2.bitwise_and(red_mask, bp_mask)
+                )
+                overlap_components = self.__component_metrics(
+                    overlap,
+                    hsv_img=hsv,
+                    return_candidates=True,
+                    min_occupancy=self.proposal_min_component_occupancy,
+                )
+                add_mode_candidates(
+                    "hybrid_overlap",
+                    overlap,
+                    overlap_components,
+                )
+                bp_components = self.__component_metrics(
+                    bp_mask,
+                    hsv_img=hsv,
+                    return_candidates=True,
+                    min_occupancy=self.proposal_min_component_occupancy,
+                )
+                add_mode_candidates("backproj", bp_mask, bp_components)
         proposed.sort(
             key=lambda item: float(item["selection_score"]),
             reverse=True,
         )
+        proposed = proposed[: max(1, int(self.max_total_ranked_candidates))]
         selected = proposed[0] if proposed else None
+        previous_track_occupancy = self._candidate_track_occupancy
+        if (
+            selected is not None
+            and previous_track_occupancy is not None
+            and float(previous_track_occupancy) >= self.tiny_component_occupancy
+            and float(selected["component"].get("occupancy", 0.0))
+            < self.tiny_component_occupancy
+            and candidate_now - float(self._candidate_track_at) <= 1.2
+        ):
+            # Do not let a tiny fragment replace a recent, physically larger
+            # track. Prefer another credible component; otherwise report a miss.
+            selected = next(
+                (
+                    item
+                    for item in proposed
+                    if float(item["component"].get("occupancy", 0.0))
+                    >= self.tiny_component_occupancy
+                ),
+                None,
+            )
         best_mode = selected["mode"] if selected is not None else "hue"
         best_mask = selected["mask"] if selected is not None else red_mask
         best_component = selected["component"] if selected is not None else None
         roi_support_ratio = float(selected["support"]) if selected is not None else 0.0
+        roi_absolute_support = (
+            float(selected["absolute_support"]) if selected is not None else 0.0
+        )
+        roi_negative_support = (
+            float(selected["negative_support"]) if selected is not None else 0.0
+        )
         candidate_count = len(proposed)
         candidate_rank = 1 if selected is not None else 0
         candidate_temporal_bonus = (
@@ -1407,6 +1577,9 @@ class detector:
                 1.0,
             )
             self._candidate_track_height = float(selected_bbox[3])
+            self._candidate_track_occupancy = float(
+                best_component.get("occupancy", 0.0)
+            )
             self._candidate_track_mode = best_mode
             self._candidate_track_at = candidate_now
 
@@ -1669,7 +1842,10 @@ class detector:
                     else:
                         prob *= 0.78
                         penalty_flags.append("roi_partial_x0.78")
-                elif best_mode in ("backproj", "hybrid_overlap", "hybrid_union"):
+                elif (
+                    best_mode in ("backproj", "hybrid_overlap", "hybrid_union")
+                    and roi_absolute_support >= 0.08
+                ):
                     prob = max(prob, min(0.36, 0.18 + 2.8 * occupancy))
                     penalty_flags.append("roi_supported_floor")
                 if best_mode == "backproj" and roi_support_ratio < 0.20:
@@ -1681,12 +1857,19 @@ class detector:
                     best_mode == "backproj"
                     and occupancy >= self.backproj_rescue_min_occupancy
                     and roi_support_ratio >= 0.24
+                    and roi_absolute_support >= 0.08
                     and bbox_bottom_frac >= 0.45
                     and hue_redness_score >= 0.42
                     and sv_score >= 0.20
                 ):
                     prob = max(prob, min(0.82, 0.34 + 5.5 * occupancy))
                     penalty_flags.append("backproj_rescue_floor")
+                if (
+                    roi_negative_support > roi_absolute_support + 0.08
+                    and occupancy < 0.10
+                ):
+                    prob *= 0.25
+                    penalty_flags.append("negative_roi_x0.25")
             prob, lower_rescued = self.__small_lower_rescue(
                 prob,
                 strict_red_ok=strict_red_ok,
@@ -1698,6 +1881,9 @@ class detector:
             )
             if lower_rescued:
                 penalty_flags.append("small_lower_cone_floor")
+            if 0.0 < occupancy < self.tiny_component_occupancy and not reached:
+                prob = min(prob, self.tiny_single_frame_probability_cap)
+                penalty_flags.append("tiny_single_frame_cap")
 
         legacy_prob = 0.0
 
@@ -1730,6 +1916,8 @@ class detector:
             "overall_score": overall_score,
             "edge_touch_count": edge_touch,
             "roi_support_ratio": roi_support_ratio,
+            "roi_absolute_support": roi_absolute_support,
+            "roi_negative_support": roi_negative_support,
             "candidate_count": candidate_count,
             "candidate_rank": candidate_rank,
             "candidate_temporal_bonus": candidate_temporal_bonus,
@@ -1852,6 +2040,12 @@ class detector:
             "occ": float(best.get("occupancy", 0.0)),
             "edge_touch": float(best.get("edge_touch_count", 0.0)),
             "roi_support": float(best.get("roi_support_ratio", 0.0)),
+            "roi_absolute_support": float(
+                best.get("roi_absolute_support", 0.0)
+            ),
+            "roi_negative_support": float(
+                best.get("roi_negative_support", 0.0)
+            ),
             "image_direction": float(best.get("image_direction", 0.5)),
             "image_direction_valid": int(best.get("image_direction_valid", 0)),
             "candidate_count": int(best.get("candidate_count", 0)),

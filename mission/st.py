@@ -48,6 +48,8 @@ class CanSatState:
         self.direction = DEFAULT_FLOAT_VALUE
         self.fall = DEFAULT_FLOAT_VALUE
         self.cone_direction = CONE_CENTER_POSITION
+        self.cone_image_direction = CONE_CENTER_POSITION
+        self.cone_image_direction_valid = False
         self.cone_probability = DEFAULT_FLOAT_VALUE
         self.cone_method = ""
         self.cone_valid = False
@@ -173,6 +175,7 @@ class CanSatState:
     def update_cone(
         self,
         cone_direction=None,
+        cone_image_direction=None,
         cone_probability=None,
         cone_is_reached=None,
         cone_method=None,
@@ -185,6 +188,9 @@ class CanSatState:
         with self.lock:
             if cone_direction is not None:
                 self.cone_direction = cone_direction
+            if cone_image_direction is not None:
+                self.cone_image_direction = cone_image_direction
+                self.cone_image_direction_valid = True
             if cone_probability is not None:
                 self.cone_probability = cone_probability
             if cone_is_reached is not None:
@@ -217,6 +223,13 @@ class CanSatState:
                     "is_reached": int(bool(self.cone_is_reached)),
                 }
             )
+            if self.cone_image_direction_valid:
+                diagnostics.update(
+                    {
+                        "image_direction": self.cone_image_direction,
+                        "image_direction_valid": 1,
+                    }
+                )
             self.cone_debug = normalize_cone_diagnostics(diagnostics)
 
     def update_obstacle(self, obstacle_dist=None, obstacle_valid=None, obstacle_stale_sec=None):
@@ -263,6 +276,8 @@ class CanSatState:
                 "direction": self.direction,
                 "fall": self.fall,
                 "cone_direction": self.cone_direction,
+                "cone_image_direction": self.cone_image_direction,
+                "cone_image_direction_valid": self.cone_image_direction_valid,
                 "cone_probability": self.cone_probability,
                 "cone_method": self.cone_method,
                 "cone_valid": self.cone_valid,

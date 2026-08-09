@@ -284,7 +284,13 @@ class HardwareManager:
         except Exception as exc:
             print(f"BMP180: Critical Error {exc}.")
 
-        self._setup_camera_detector()
+        # Vision is not needed before Phase4.  In particular, do not create or
+        # open a camera pipeline during P0-P3: a loose CSI connector must stay
+        # isolated from navigation and motor control.  camera_thread activates
+        # the detector only after the mission actually enters P4/P5.
+        self.devices[DEVICE_DETECTOR] = None
+        self._camera_runtime_active = False
+        print("Camera: Deferred until Phase4.")
 
         self._setup_gpio_devices(include_sonar=True)
 

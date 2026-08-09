@@ -119,7 +119,7 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertTrue(args[3])
         self.assertEqual(kwargs["cmd_type"], "phase4_search_arc")
 
-    def test_phase4_single_candidate_enters_non_stopping_capture_arc(self):
+    def test_phase4_single_candidate_only_slows_established_search_arc(self):
         ctrl = _HeadingOnlyController()
 
         ctrl._drive_phase4_camera(
@@ -135,9 +135,66 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertGreaterEqual(min(args[0], args[2]), 45.0)
         self.assertTrue(args[1])
         self.assertTrue(args[3])
+        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_observe_arc")
+
+    def test_phase4_tiny_single_frame_does_not_change_search_motor_command(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.17,
+                cone_direction=0.9,
+                cone_debug={
+                    "strict_red_ok": 0,
+                    "occupancy": 0.001,
+                    "candidate_probability": 0.80,
+                    "cone_shape_score": 0.80,
+                    "hue_redness_score": 0.80,
+                    "sv_score": 0.70,
+                    "roi_support_ratio": 0.60,
+                    "roi_absolute_support": 0.20,
+                },
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (45, 90))
+        self.assertEqual(kwargs["cmd_type"], "phase4_search_arc")
+
+    def test_phase4_tiny_candidate_requires_three_consistent_frames_to_steer(self):
+        ctrl = _HeadingOnlyController()
+        debug = {
+            "strict_red_ok": 0,
+            "occupancy": 0.001,
+            "candidate_probability": 0.80,
+            "cone_shape_score": 0.80,
+            "hue_redness_score": 0.80,
+            "sv_score": 0.70,
+            "roi_support_ratio": 0.60,
+            "roi_absolute_support": 0.20,
+        }
+        for sequence, now in ((1, 100.0), (2, 100.4), (3, 100.8)):
+            with patch.object(mtr_mgr_under_test.time, "time", return_value=now):
+                ctrl._drive_phase4_camera(
+                    self._fresh_camera_snapshot(
+                        cone_sequence=sequence,
+                        cone_updated_at=now,
+                        cone_probability=0.17,
+                        cone_direction=0.8,
+                        cone_debug=debug,
+                    )
+                )
+            if sequence < 3:
+                self.assertEqual(
+                    ctrl.motor_commands[-1][1]["cmd_type"],
+                    "phase4_search_arc",
+                )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (60, 45))
         self.assertEqual(kwargs["cmd_type"], "phase4_candidate_capture_arc")
 
-    def test_phase4_centered_candidate_keeps_minimum_forward_drive(self):
+    def test_phase4_centered_single_candidate_does_not_drive_toward_it(self):
         ctrl = _HeadingOnlyController()
 
         ctrl._drive_phase4_camera(
@@ -149,10 +206,10 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 45))
+        self.assertEqual((args[0], args[2]), (45, 60))
         self.assertTrue(args[1])
         self.assertTrue(args[3])
-        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_capture_forward")
+        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_observe_arc")
 
     def test_phase4_loss_rechecks_last_direction_then_resumes_search(self):
         ctrl = _HeadingOnlyController()
@@ -176,7 +233,7 @@ class Phase3HeadingTest(unittest.TestCase):
             )
         self.assertEqual(
             ctrl.motor_commands[-1][1]["cmd_type"],
-            "phase4_candidate_capture_arc",
+            "phase4_candidate_observe_arc",
         )
 
         with patch.object(mtr_mgr_under_test.time, "time", return_value=101.2):
@@ -186,7 +243,46 @@ class Phase3HeadingTest(unittest.TestCase):
                     cone_updated_at=101.2,
                 )
             )
-        self.assertEqual(ctrl.motor_commands[-1][1]["cmd_type"], "phase4_search_arc")
+        self.assertEqual(
+            ctrl.motor_commands[-1][1]["cmd_type"],
+            "phase4_candidate_observe_arc",
+        )
+
+    def test_phase4_three_fresh_frames_confirm_left_image_steering(self):
+        ctrl = _HeadingOnlyController()
+        for sequence, now in ((1, 100.0), (2, 100.4), (3, 100.8)):
+            with patch.object(mtr_mgr_under_test.time, "time", return_value=now):
+                ctrl._drive_phase4_camera(
+                    self._fresh_camera_snapshot(
+                        cone_sequence=sequence,
+                        cone_updated_at=now,
+                        cone_probability=0.5,
+                        cone_direction=0.2,
+                        cone_debug={"strict_red_ok": 1, "occupancy": 0.01},
+                    )
+                )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (45, 60))
+        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_capture_arc")
+
+    def test_phase4_three_fresh_frames_confirm_right_image_steering(self):
+        ctrl = _HeadingOnlyController()
+        for sequence, now in ((1, 100.0), (2, 100.4), (3, 100.8)):
+            with patch.object(mtr_mgr_under_test.time, "time", return_value=now):
+                ctrl._drive_phase4_camera(
+                    self._fresh_camera_snapshot(
+                        cone_sequence=sequence,
+                        cone_updated_at=now,
+                        cone_probability=0.5,
+                        cone_direction=0.8,
+                        cone_debug={"strict_red_ok": 1, "occupancy": 0.01},
+                    )
+                )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (60, 45))
+        self.assertEqual(kwargs["cmd_type"], "phase4_candidate_capture_arc")
 
     def test_phase5_approach_calls_configured_maximum_steering_arc(self):
         ctrl = _HeadingOnlyController()
@@ -203,6 +299,20 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertTrue(args[1])
         self.assertTrue(args[3])
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_left")
+
+    def test_phase5_image_right_steers_right(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase5_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=0.5,
+                cone_direction=1.0,
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (100.0, 58.0))
+        self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_right")
 
     def test_stale_camera_observation_stops_phase4_motion(self):
         ctrl = _HeadingOnlyController()

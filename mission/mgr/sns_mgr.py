@@ -71,6 +71,7 @@ from mission.const import (
     GPS_RECONNECT_SLEEP,
     GPS_STABLE_FIX_COUNT,
     PHASES_CAMERA_ACTIVE,
+    Phase,
     SONAR_MAX_DISTANCE,
     SONAR_STALE_TIMEOUT_SEC,
 )
@@ -850,15 +851,18 @@ class SensorManager:
                 raise RuntimeError("camera capture failed")
             prob = detector.probability if detector.probability else 0.0
             cdir = CONE_CENTER_POSITION
+            image_dir = CONE_CENTER_POSITION
             if detector.cone_direction is not None:
                 # detector.cone_direction is in camera image coordinates.
-                # Convert to mission convention, then apply mount compensation.
-                cdir = 1.0 - float(detector.cone_direction)
-                cdir = self._transform_cone_direction_for_control(cdir)
+                # Keep that physical image position explicitly and apply the
+                # optional mount compensation exactly once for motor control.
+                image_dir = max(0.0, min(1.0, float(detector.cone_direction)))
+                cdir = self._transform_cone_direction_for_control(image_dir)
             cone_method = str(getattr(detector, "debug_method", "unknown"))
             cone_debug = detector_diagnostics(detector, valid=True, status="ok")
             self.st.update_cone(
                 cone_direction=cdir,
+                cone_image_direction=image_dir,
                 cone_probability=prob,
                 cone_is_reached=detector.is_reached,
                 cone_method=cone_method,
@@ -1135,16 +1139,46 @@ class SensorManager:
 
     def camera_thread(self):
         while not bool(getattr(self, "_shutdown_requested", False)):
-            current_phase = self.st.snapshot()["phase"]
-            if current_phase in PHASES_CAMERA_ACTIVE:
-                t_start = time.time()
-                self.cone_detect()
-                elapsed = time.time() - t_start
-                remain = float(CAMERA_ACTIVE_SLEEP) - elapsed
-                if remain > 0.0:
-                    time.sleep(remain)
-            else:
+            try:
+                current_phase = self.st.snapshot()["phase"]
+                if self._sync_camera_runtime_for_phase(current_phase):
+                    t_start = time.time()
+                    self.cone_detect()
+                    elapsed = time.time() - t_start
+                    remain = float(CAMERA_ACTIVE_SLEEP) - elapsed
+                    if remain > 0.0:
+                        time.sleep(remain)
+                else:
+                    time.sleep(CAMERA_IDLE_SLEEP)
+            except Exception as exc:
+                # Camera failures are optional-subsystem failures.  Keep them
+                # inside this worker so they can never request a motor stop.
+                print(f"Camera Thread Slice Error: {exc}")
                 time.sleep(CAMERA_IDLE_SLEEP)
+
+    def _sync_camera_runtime_for_phase(self, phase):
+        """Keep camera hardware completely inactive outside P4/P5."""
+        try:
+            phase_enum = Phase(phase)
+        except (TypeError, ValueError):
+            phase_enum = None
+        camera_needed = phase_enum in PHASES_CAMERA_ACTIVE
+
+        if not camera_needed:
+            detector = self.devices.get(DEVICE_DETECTOR)
+            if bool(getattr(self, "_camera_runtime_active", False)) or detector is not None:
+                if hasattr(self, "_release_camera_detector"):
+                    self._release_camera_detector()
+            self._camera_runtime_active = False
+            return False
+
+        if not bool(getattr(self, "_camera_runtime_active", False)):
+            self._camera_runtime_active = True
+            if self.devices.get(DEVICE_DETECTOR) is None:
+                setup = getattr(self, "_setup_camera_detector", None)
+                if callable(setup):
+                    setup()
+        return True
 
     def bno_thread(self):
         suspicious_bno_counter = 0

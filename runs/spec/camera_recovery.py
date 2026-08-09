@@ -28,11 +28,26 @@ spec = importlib.util.spec_from_file_location("camera_recovery_under_test", SNS_
 sns_mgr_under_test = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sns_mgr_under_test)
 SensorManager = sns_mgr_under_test.SensorManager
+from mission.st import CanSatState
 
 
 class _Detector:
     def set_roi_img(self, _roi):
         pass
+
+
+class _LiveDetector(_Detector):
+    probability = 0.4
+    cone_direction = 0.2
+    is_reached = False
+    is_detected = True
+    occupancy = 0.02
+    frame_red_occupancy = 0.03
+    debug_method = "test:hue"
+    debug_scores = {"image_direction": 0.2, "image_direction_valid": 1}
+
+    def detect_cone(self):
+        return True
 
 
 class _CameraRecoveryController(SensorManager):
@@ -52,6 +67,77 @@ class _CameraRecoveryController(SensorManager):
 
 
 class CameraRecoveryTest(unittest.TestCase):
+    def test_camera_control_direction_is_not_unconditionally_mirrored(self):
+        ctrl = _CameraRecoveryController()
+        ctrl.camera_control_invert_x = False
+        self.assertAlmostEqual(ctrl._transform_cone_direction_for_control(0.2), 0.2)
+
+        ctrl.camera_control_invert_x = True
+        self.assertAlmostEqual(ctrl._transform_cone_direction_for_control(0.2), 0.8)
+
+    def test_cone_detection_stores_image_and_control_x_without_extra_flip(self):
+        ctrl = _CameraRecoveryController()
+        ctrl.st = CanSatState()
+        ctrl.devices["detector"] = _LiveDetector()
+        ctrl.camera_control_invert_x = False
+        ctrl.camera_fail_count = 0
+        ctrl._record_camera_recovered = lambda: None
+
+        ctrl.cone_detect()
+
+        snapshot = ctrl.st.snapshot()
+        self.assertAlmostEqual(snapshot["cone_image_direction"], 0.2)
+        self.assertAlmostEqual(snapshot["cone_direction"], 0.2)
+
+    def test_camera_is_not_initialized_through_phase3(self):
+        ctrl = _CameraRecoveryController()
+        ctrl.setup_calls = 0
+        ctrl.release_calls = 0
+        ctrl._camera_runtime_active = False
+
+        def setup_camera():
+            ctrl.setup_calls += 1
+
+        def release_camera():
+            ctrl.release_calls += 1
+            ctrl.devices["detector"] = None
+
+        ctrl._setup_camera_detector = setup_camera
+        ctrl._release_camera_detector = release_camera
+
+        for phase in (0, 1, 2, 3):
+            self.assertFalse(ctrl._sync_camera_runtime_for_phase(phase))
+
+        self.assertEqual(ctrl.setup_calls, 0)
+        self.assertEqual(ctrl.release_calls, 0)
+        self.assertFalse(ctrl._camera_runtime_active)
+
+    def test_camera_activates_at_phase4_and_is_released_on_p3_fallback(self):
+        ctrl = _CameraRecoveryController()
+        ctrl.setup_calls = 0
+        ctrl.release_calls = 0
+        ctrl._camera_runtime_active = False
+
+        def setup_camera():
+            ctrl.setup_calls += 1
+            ctrl.devices["detector"] = _Detector()
+
+        def release_camera():
+            ctrl.release_calls += 1
+            ctrl.devices["detector"] = None
+
+        ctrl._setup_camera_detector = setup_camera
+        ctrl._release_camera_detector = release_camera
+
+        self.assertTrue(ctrl._sync_camera_runtime_for_phase(4))
+        self.assertEqual(ctrl.setup_calls, 1)
+        self.assertTrue(ctrl._camera_runtime_active)
+
+        self.assertFalse(ctrl._sync_camera_runtime_for_phase(3))
+        self.assertEqual(ctrl.release_calls, 1)
+        self.assertIsNone(ctrl.devices["detector"])
+        self.assertFalse(ctrl._camera_runtime_active)
+
     def test_fresh_phase4_window_clears_stale_exhaustion(self):
         ctrl = _CameraRecoveryController()
         ctrl.camera_fail_count = 9

@@ -17,11 +17,13 @@ from mission.const import (
     CAMERA_WEAK_MAX_MISSED_FRAMES,
     CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
     CAMERA_WEAK_MIN_HUE_SCORE,
+    CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT,
     CAMERA_WEAK_MIN_ROI_SUPPORT,
     CAMERA_WEAK_MIN_SHAPE_SCORE,
     CAMERA_WEAK_MIN_SV_SCORE,
     CAMERA_WEAK_RELAXED_SV_SCORE,
     CAMERA_WEAK_STRONG_HUE_SCORE,
+    CAMERA_TINY_OCCUPANCY_THRESHOLD,
     CONE_CENTER_POSITION,
     CONE_PHASE4_BBOX_CENTER_Y_TOLERANCE,
     CONE_PHASE4_BBOX_SIZE_RATIO_MAX,
@@ -69,6 +71,10 @@ class Phase4Handler(BasePhaseHandler):
         hue = self._float_value(debug.get("hue_redness_score", 0.0))
         sv = self._float_value(debug.get("sv_score", 0.0))
         roi_support = self._float_value(debug.get("roi_support_ratio", 0.0))
+        roi_absolute_support = self._float_value(
+            debug.get("roi_absolute_support", 0.0)
+        )
+        occupancy = self._float_value(debug.get("occupancy", 0.0))
         ground_penalty = self._float_value(debug.get("ground_penalty", 1.0), 1.0)
         bbox_height = self._float_value(debug.get("bbox_height", 0.0))
         bbox_bottom = self._float_value(debug.get("bbox_bottom_frac", 0.0))
@@ -87,12 +93,18 @@ class Phase4Handler(BasePhaseHandler):
                 and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE + 0.10
             )
         )
+        tiny = 0.0 < occupancy < float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
         return bool(
             centered
             and candidate_prob >= CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY
             and shape >= CAMERA_WEAK_MIN_SHAPE_SCORE
             and color_quality
             and reference_quality
+            and (
+                not tiny
+                or roi_absolute_support
+                >= CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT
+            )
             and ground_penalty >= 0.5
             and "upper_sky" not in penalty_flags
             and (bbox_height <= 0.0 or bbox_bottom >= 0.35)
@@ -137,11 +149,20 @@ class Phase4Handler(BasePhaseHandler):
             height_frac = 0.0
             bottom_frac = 0.0
 
-        # cone_dir is intentionally mirrored into the rover control frame.
-        # Bearing consistency must instead use the physical image X axis, where
-        # image-right is a positive camera offset from the compass heading.
+        # Bearing consistency uses the physical image X axis.  Motor control
+        # direction is kept separately so mount compensation cannot leak into
+        # visual tracking geometry.
         image_direction = None
-        if bbox_valid and reported_width_frac > 0.0:
+        snapshot_image_direction = snapshot.get("cone_image_direction")
+        if (
+            snapshot_image_direction is not None
+            and bool(snapshot.get("cone_image_direction_valid", False))
+        ):
+            image_direction = self._float_value(
+                snapshot_image_direction,
+                CONE_CENTER_POSITION,
+            )
+        elif bbox_valid and reported_width_frac > 0.0:
             frame_width = bbox_w / reported_width_frac
             image_direction = (bbox_x + 0.5 * bbox_w) / max(frame_width, 1.0)
         elif bool(int(self._float_value(debug.get("image_direction_valid", 0.0)))):
@@ -150,8 +171,9 @@ class Phase4Handler(BasePhaseHandler):
                 CONE_CENTER_POSITION,
             )
         else:
-            # Backward-compatible fallback for logs produced before schema v3.
-            image_direction = 1.0 - float(cone_dir)
+            # Backward-compatible fallback: the control and image conventions
+            # are now identical unless explicit mount inversion is configured.
+            image_direction = float(cone_dir)
         image_direction = max(0.0, min(1.0, float(image_direction)))
 
         if bool(snapshot.get("angle_valid", False)):
@@ -179,6 +201,7 @@ class Phase4Handler(BasePhaseHandler):
             "center_y": center_y,
             "height_frac": height_frac,
             "bottom_frac": bottom_frac,
+            "occupancy": self._float_value(debug.get("occupancy", 0.0)),
         }
 
     def _candidate_consistency(self, previous, current):
@@ -259,15 +282,17 @@ class Phase4Handler(BasePhaseHandler):
 
     @staticmethod
     def _arm_candidate_capture(controller, now, cone_dir):
-        controller.phase4_search_state = "capture"
-        controller.phase4_last_candidate_dir = float(cone_dir)
+        # The motor thread owns observe/track transitions.  Phase logic only
+        # publishes the latest candidate and a hard observation deadline.
+        controller.phase4_phase_candidate_dir = float(cone_dir)
         capture_sec = float(getattr(controller, "phase4_candidate_capture_sec", 0.0))
         if capture_sec <= 0.0:
             capture_sec = float(PHASE4_CANDIDATE_CAPTURE_SEC)
-        controller.phase4_candidate_active_until = max(
-            float(getattr(controller, "phase4_candidate_active_until", 0.0) or 0.0),
-            float(now) + capture_sec,
+        active_until = float(
+            getattr(controller, "phase4_candidate_active_until", 0.0) or 0.0
         )
+        if active_until <= float(now):
+            controller.phase4_candidate_active_until = float(now) + capture_sec
 
     def _fallback_to_p3(self, controller, current_snapshot, reason):
         fallback_dir = current_snapshot["angle"] if current_snapshot["angle_valid"] else current_snapshot["direction"]
@@ -400,10 +425,16 @@ class Phase4Handler(BasePhaseHandler):
         centered = abs(cone_dir_val - CONE_CENTER_POSITION) <= CONE_PHASE4_CENTER_TOLERANCE
         cone_debug = dict(current_snapshot.get("cone_debug", {}) or {})
         strict_red_ok = bool(int(self._float_value(cone_debug.get("strict_red_ok", 0))))
+        occupancy = self._float_value(cone_debug.get("occupancy", 0.0))
+        credible_single_frame_size = bool(
+            occupancy <= 0.0
+            or occupancy >= float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
+        )
         strict_detect = (
             cone_prob > CONE_PROBABILITY_THRESHOLD_PHASE4
             and centered
             and strict_red_ok
+            and credible_single_frame_size
         )
         loose_detect = cone_prob > CONE_PROBABILITY_THRESHOLD
         weak_detect = self._weak_candidate(current_snapshot, cone_dir_val)
@@ -421,7 +452,34 @@ class Phase4Handler(BasePhaseHandler):
         if candidate_detect:
             current_is_strict = bool(cone_reached_effective or strict_detect)
             previous_marker = getattr(controller, "phase4_detect_confirm_marker", None)
-            if consistent:
+            previous_signature = getattr(
+                controller,
+                "phase4_detect_track_signature",
+                None,
+            )
+            preserve_large_track = bool(
+                not consistent
+                and previous_signature
+                and float(previous_signature.get("occupancy", 0.0))
+                >= float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
+                and 0.0 < float(signature.get("occupancy", 0.0))
+                < float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
+            )
+            if preserve_large_track:
+                controller.phase4_candidate_missed_frames = int(
+                    getattr(controller, "phase4_candidate_missed_frames", 0)
+                ) + 1
+                controller.cone_phase_decision = (
+                    f"p4_track_hold_{consistency_reason}"
+                )
+                if (
+                    controller.phase4_candidate_missed_frames
+                    > CAMERA_WEAK_MAX_MISSED_FRAMES
+                ):
+                    self._reset_strong_confirmation(controller)
+                candidate_detect = False
+                controller.cone_phase_detected = False
+            elif consistent:
                 controller.phase4_detect_confirm_count = int(
                     getattr(controller, "phase4_detect_confirm_count", 0)
                 ) + 1
@@ -448,9 +506,10 @@ class Phase4Handler(BasePhaseHandler):
                 controller.phase4_detect_confirm_marker = cone_dir_val
                 prefix = "p4_track_reset" if current_is_strict else "p4_weak_track_reset"
                 controller.cone_phase_decision = f"{prefix}_{consistency_reason}"
-            controller.phase4_detect_track_signature = signature
-            controller.phase4_candidate_missed_frames = 0
-            self._arm_candidate_capture(controller, now, cone_dir_val)
+            if not preserve_large_track:
+                controller.phase4_detect_track_signature = signature
+                controller.phase4_candidate_missed_frames = 0
+                self._arm_candidate_capture(controller, now, cone_dir_val)
         else:
             controller.cone_phase_decision = (
                 "p4_low_confidence_hold" if loose_detect else "p4_no_detection"

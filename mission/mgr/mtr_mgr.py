@@ -7,10 +7,13 @@ from mission.const import (
     CAMERA_FRAME_STALE_STOP_SEC,
     CAMERA_WEAK_MIN_CANDIDATE_PROBABILITY,
     CAMERA_WEAK_MIN_HUE_SCORE,
+    CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT,
     CAMERA_WEAK_MIN_ROI_SUPPORT,
     CAMERA_WEAK_MIN_SHAPE_SCORE,
     CAMERA_WEAK_MIN_SV_SCORE,
     CONE_CENTER_POSITION,
+    CAMERA_TINY_MIN_CONSISTENT_FRAMES,
+    CAMERA_TINY_OCCUPANCY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD_PHASE4,
     CONE_PROBABILITY_THRESHOLD_PHASE5,
@@ -43,7 +46,10 @@ from mission.const import (
     PHASE4_ALIGN_STOP_DEADBAND,
     PHASE4_CANDIDATE_INNER_SPEED,
     PHASE4_CANDIDATE_CAPTURE_SEC,
+    PHASE4_CANDIDATE_CAPTURE_MAX_FRAMES,
+    PHASE4_CANDIDATE_CAPTURE_MIN_FRAMES,
     PHASE4_CANDIDATE_OUTER_SPEED,
+    PHASE4_CANDIDATE_TRACK_CONFIRM_FRAMES,
     PHASE4_MOTOR_RAMP_TIME,
     PHASE4_REACQUIRE_TURN_SEC,
     PHASE45_CONE_DIR_FILTER_ALPHA,
@@ -507,6 +513,11 @@ class MotorManager:
         self.phase4_last_candidate_dir = last_candidate
         self.phase4_candidate_active_until = 0.0
         self.phase4_motor_candidate_seq = 0
+        self.phase4_observe_frame_count = 0
+        self.phase4_motor_track_count = 0
+        self.phase4_motor_track_signature = None
+        self.phase4_motor_missed_frames = 0
+        self.phase4_motor_track_updated_at = 0.0
 
     @staticmethod
     def _snapshot_float(snapshot, key, default=0.0):
@@ -573,13 +584,20 @@ class MotorManager:
         )
         return True
 
-    def _phase4_new_snapshot_candidate(self, snapshot, now):
-        sequence = int(self._snapshot_float(snapshot, "cone_sequence", 0.0))
-        if sequence <= int(getattr(self, "phase4_motor_candidate_seq", 0)):
-            return False
-        self.phase4_motor_candidate_seq = sequence
+    def _drive_phase4_candidate_observe(self):
+        """Slow the established left search arc without chasing one frame."""
+        self._set_forward_pivot_turn(
+            "left",
+            PHASE4_CANDIDATE_OUTER_SPEED,
+            cmd_type="phase4_candidate_observe_arc",
+            speed_inner=PHASE4_CANDIDATE_INNER_SPEED,
+            ramp_time=PHASE4_MOTOR_RAMP_TIME,
+        )
+
+    def _phase4_motor_candidate(self, snapshot):
         debug = dict(snapshot.get("cone_debug", {}) or {})
         probability = self._snapshot_float(snapshot, "cone_probability", 0.0)
+        occupancy = self._snapshot_float(debug, "occupancy", 0.0)
         strict = bool(int(self._snapshot_float(debug, "strict_red_ok", 0.0))) and (
             probability > float(CONE_PROBABILITY_THRESHOLD_PHASE4)
         )
@@ -596,17 +614,141 @@ class MotorManager:
             >= CAMERA_WEAK_MIN_ROI_SUPPORT
         )
         if not (strict or weak):
-            return False
-        self.phase4_last_candidate_dir = self._snapshot_float(
+            return None
+
+        tiny = 0.0 < occupancy < float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
+        absolute_roi = self._snapshot_float(debug, "roi_absolute_support", 0.0)
+        # Unknown occupancy is retained for old diagnostics/tests. Production
+        # frames always report it. Tiny candidates require absolute ROI evidence.
+        if tiny and absolute_roi < float(CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT):
+            return None
+        direction = self._snapshot_float(
             snapshot,
             "cone_direction",
             CONE_CENTER_POSITION,
         )
-        self.phase4_candidate_active_until = float(now) + float(
-            PHASE4_CANDIDATE_CAPTURE_SEC
-        )
-        self.phase4_search_state = "capture"
+        return {
+            "direction": max(0.0, min(1.0, direction)),
+            "occupancy": occupancy,
+            "tiny": tiny,
+        }
+
+    @staticmethod
+    def _phase4_motor_candidate_consistent(previous, current):
+        if not previous:
+            return True
+        if abs(float(current["direction"]) - float(previous["direction"])) > 0.22:
+            return False
+        previous_occ = float(previous.get("occupancy", 0.0))
+        current_occ = float(current.get("occupancy", 0.0))
+        if previous_occ > 0.0 and current_occ > 0.0:
+            ratio = max(previous_occ / current_occ, current_occ / previous_occ)
+            if ratio > 2.4:
+                return False
         return True
+
+    def _phase4_new_snapshot_candidate(self, snapshot, now):
+        sequence = int(self._snapshot_float(snapshot, "cone_sequence", 0.0))
+        if sequence <= int(getattr(self, "phase4_motor_candidate_seq", 0)):
+            return False
+        self.phase4_motor_candidate_seq = sequence
+        state = getattr(self, "phase4_search_state", "drive")
+        if state == "observe":
+            self.phase4_observe_frame_count = int(
+                getattr(self, "phase4_observe_frame_count", 0)
+            ) + 1
+
+        candidate = self._phase4_motor_candidate(snapshot)
+        previous = getattr(self, "phase4_motor_track_signature", None)
+        last_track_at = float(getattr(self, "phase4_motor_track_updated_at", 0.0))
+        if previous and last_track_at > 0.0 and float(now) - last_track_at > float(
+            PHASE4_CANDIDATE_CAPTURE_SEC
+        ):
+            previous = None
+            self.phase4_motor_track_signature = None
+            self.phase4_motor_track_count = 0
+        if candidate is not None:
+            consistent = self._phase4_motor_candidate_consistent(previous, candidate)
+            if not consistent:
+                previous_occ = float((previous or {}).get("occupancy", 0.0))
+                # A tiny high-score grass fragment must not steal a credible
+                # cone track. Treat it as a missed frame instead.
+                if (
+                    previous_occ >= float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
+                    and bool(candidate.get("tiny"))
+                ):
+                    candidate = None
+                else:
+                    self.phase4_motor_track_count = 0
+                    previous = None
+
+        if candidate is not None:
+            if bool(candidate.get("tiny")) and state not in ("observe", "track"):
+                # Collect a temporal track while preserving the normal search
+                # command. A tiny single frame must not move the rover at all.
+                self.phase4_motor_track_count = int(
+                    getattr(self, "phase4_motor_track_count", 0)
+                ) + 1
+                self.phase4_motor_track_signature = candidate
+                self.phase4_motor_track_updated_at = float(now)
+                self.phase4_motor_missed_frames = 0
+                if self.phase4_motor_track_count >= int(
+                    CAMERA_TINY_MIN_CONSISTENT_FRAMES
+                ):
+                    self.phase4_search_state = "track"
+                    self.phase4_last_candidate_dir = float(candidate["direction"])
+                    self.phase4_candidate_active_until = (
+                        float(now) + float(PHASE4_CANDIDATE_CAPTURE_SEC)
+                    )
+                return True
+
+            if state not in ("observe", "track"):
+                self.phase4_search_state = "observe"
+                state = "observe"
+                self.phase4_observe_frame_count = 1
+                self.phase4_candidate_active_until = (
+                    float(now) + float(PHASE4_CANDIDATE_CAPTURE_SEC)
+                )
+            elif state == "track" and float(now) > float(
+                getattr(self, "phase4_candidate_active_until", now)
+            ):
+                self.phase4_candidate_active_until = (
+                    float(now) + float(PHASE4_CANDIDATE_CAPTURE_SEC)
+                )
+
+            self.phase4_motor_track_count = int(
+                getattr(self, "phase4_motor_track_count", 0)
+            ) + 1
+            self.phase4_motor_track_signature = candidate
+            self.phase4_motor_track_updated_at = float(now)
+            self.phase4_motor_missed_frames = 0
+            required = (
+                CAMERA_TINY_MIN_CONSISTENT_FRAMES
+                if bool(candidate.get("tiny"))
+                else PHASE4_CANDIDATE_TRACK_CONFIRM_FRAMES
+            )
+            if (
+                int(self.phase4_motor_track_count) >= int(required)
+                and int(getattr(self, "phase4_observe_frame_count", 0))
+                >= int(PHASE4_CANDIDATE_CAPTURE_MIN_FRAMES)
+            ):
+                self.phase4_search_state = "track"
+                self.phase4_last_candidate_dir = float(candidate["direction"])
+            return True
+
+        if state in ("observe", "track") or (
+            previous and bool(previous.get("tiny"))
+        ):
+            self.phase4_motor_missed_frames = int(
+                getattr(self, "phase4_motor_missed_frames", 0)
+            ) + 1
+            if (
+                state == "drive"
+                and self.phase4_motor_missed_frames > 1
+            ):
+                self.phase4_motor_track_signature = None
+                self.phase4_motor_track_count = 0
+        return False
 
     def _update_phase45_filtered_cone_dir(self, raw_cone_direction, cone_seen):
         if not cone_seen:
@@ -642,13 +784,33 @@ class MotorManager:
             return
         self._phase4_new_snapshot_candidate(snapshot, now)
         state = getattr(self, "phase4_search_state", "drive")
-        if state == "capture":
-            capture_until = float(
-                getattr(self, "phase4_candidate_active_until", now) or now
-            )
-            if now < capture_until and self._drive_phase4_candidate_capture():
+        capture_until = float(
+            getattr(self, "phase4_candidate_active_until", now) or now
+        )
+        if state == "observe":
+            observed_frames = int(getattr(self, "phase4_observe_frame_count", 0))
+            if (
+                now < capture_until
+                and observed_frames < int(PHASE4_CANDIDATE_CAPTURE_MAX_FRAMES)
+            ):
+                self._drive_phase4_candidate_observe()
                 return
+            trusted = getattr(self, "phase4_motor_track_signature", None)
+            if trusted and not bool(trusted.get("tiny")):
+                self.phase4_last_candidate_dir = float(trusted["direction"])
+                self.phase4_search_state = "reacquire"
+                self.phase4_reacquire_until = now + float(PHASE4_REACQUIRE_TURN_SEC)
+                if self._drive_phase4_toward_last_candidate():
+                    return
             self.phase4_search_state = "drive"
+        if state == "track":
+            if now < capture_until and int(
+                getattr(self, "phase4_motor_missed_frames", 0)
+            ) <= 1 and self._drive_phase4_candidate_capture():
+                return
+            self.phase4_search_state = "reacquire"
+            self.phase4_reacquire_until = now + float(PHASE4_REACQUIRE_TURN_SEC)
+            state = "reacquire"
         if state == "reacquire":
             reacquire_until = getattr(self, "phase4_reacquire_until", now)
             if now < float(reacquire_until) and self._drive_phase4_toward_last_candidate():

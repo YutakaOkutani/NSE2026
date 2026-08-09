@@ -75,6 +75,26 @@ class ConeDetectorLogicTest(unittest.TestCase):
         self.assertTrue(rescued)
         self.assertEqual(probability, 0.24)
 
+    def test_tiny_component_cannot_be_strict_on_one_frame(self):
+        detector = object.__new__(Detector)
+        detector.camera_height = 480
+        detector.tiny_component_occupancy = 0.003
+        component = {
+            "occupancy": 0.001,
+            "hue_redness_score": 0.90,
+            "sv_score": 0.90,
+            "cone_shape_score": 0.90,
+            "score": 0.90,
+            "bbox": [100, 300, 15, 25],
+        }
+
+        reason = detector._detector__strict_red_candidate_reject_reason(
+            component,
+            1.0,
+        )
+
+        self.assertEqual(reason, "tiny_single_frame")
+
     def test_small_fragment_requires_roi_or_strong_color_support(self):
         detector = object.__new__(Detector)
         detector.min_component_occupancy = 0.001
@@ -91,7 +111,7 @@ class ConeDetectorLogicTest(unittest.TestCase):
         self.assertTrue(
             detector._detector__proposal_is_eligible(fragment, 0.22, "hue")
         )
-        self.assertTrue(
+        self.assertFalse(
             detector._detector__proposal_is_eligible(
                 fragment,
                 0.0,

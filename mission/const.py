@@ -117,7 +117,7 @@ CONE_PROBABILITY_THRESHOLD = 0.10
 # Phase4 should accept that signal instead of holding forever on "low-confidence".
 CONE_PROBABILITY_THRESHOLD_PHASE4 = 0.20
 CONE_PROBABILITY_THRESHOLD_PHASE5 = 0.18
-CONE_PHASE4_CONFIRM_FRAMES = 2
+CONE_PHASE4_CONFIRM_FRAMES = 3
 CONE_PHASE4_CENTER_TOLERANCE = 0.42
 CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE = 0.22
 CONE_PHASE4_BEARING_CONSISTENCY_TOLERANCE_DEG = 15.0
@@ -181,9 +181,16 @@ CAMERA_WEAK_MIN_SV_SCORE = 0.28
 CAMERA_WEAK_STRONG_HUE_SCORE = 0.58
 CAMERA_WEAK_RELAXED_SV_SCORE = 0.20
 CAMERA_WEAK_MIN_ROI_SUPPORT = 0.10
-# A track containing at least one strict observation needs two consistent
-# frames.  Weak-only tracks need three fresh frames.
-CAMERA_MIXED_CONFIRM_FRAMES = 2
+CAMERA_WEAK_MIN_ROI_ABSOLUTE_SUPPORT = 0.08
+# A single component below this occupancy is too small to steer the rover.
+# Field evidence separated real cones (>=0.0051) from grass false positives
+# (<=0.00134), leaving a deliberate margin at 0.003.
+CAMERA_TINY_OCCUPANCY_THRESHOLD = 0.003
+CAMERA_TINY_MIN_CONSISTENT_FRAMES = 3
+# Phase transition requires three physical frames for both mixed/strict and
+# weak tracks. Motor recentering also waits for the three-frame observation
+# window, with at least two credible consistent observations inside it.
+CAMERA_MIXED_CONFIRM_FRAMES = 3
 CAMERA_WEAK_CONFIRM_FRAMES = 3
 CAMERA_WEAK_MAX_MISSED_FRAMES = 1
 
@@ -211,9 +218,12 @@ ROI_GLOB_PATTERNS = (
 PHASE4_SEARCH_OUTER_SPEED = 90
 # 芝生で低速輪がストールしないよう、Phase4 の全動作で最低45%を保つ。
 PHASE4_SEARCH_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
-# A plausible visual candidate temporarily slows the arc without issuing a
-# hard stop.  This leaves enough time for 3-5 fresh frames at the field rate.
-PHASE4_CANDIDATE_CAPTURE_SEC = 1.10
+# Candidate observation is governed by fresh-frame count.  The time limit is
+# only a safety bound when detector throughput drops.
+PHASE4_CANDIDATE_CAPTURE_SEC = 2.50
+PHASE4_CANDIDATE_CAPTURE_MIN_FRAMES = 3
+PHASE4_CANDIDATE_CAPTURE_MAX_FRAMES = 5
+PHASE4_CANDIDATE_TRACK_CONFIRM_FRAMES = 2
 PHASE4_CANDIDATE_OUTER_SPEED = 60
 PHASE4_CANDIDATE_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
 PHASE4_REACQUIRE_TURN_SEC = 0.80
