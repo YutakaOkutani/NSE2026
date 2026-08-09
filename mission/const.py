@@ -215,7 +215,7 @@ ROI_GLOB_PATTERNS = (
 )
 
 # モーター制御関連定数
-PHASE4_SEARCH_OUTER_SPEED = 90
+PHASE4_SEARCH_OUTER_SPEED = 80
 # 芝生で低速輪がストールしないよう、Phase4 の全動作で最低45%を保つ。
 PHASE4_SEARCH_INNER_SPEED = GRASS_MIN_MOTOR_SPEED
 # Candidate observation is governed by fresh-frame count.  The time limit is
