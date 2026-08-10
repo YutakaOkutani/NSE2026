@@ -23,7 +23,7 @@ LOG_FILE_DATETIME_FORMAT = "%Y-%m%d-%H%M%S"
 
 # タイムアウトと動作関連定数
 TIMEOUT_PHASE_0 = 2 * 60
-TIMEOUT_PHASE_1 = 30
+TIMEOUT_PHASE_1 = 10
 # Offset成立を優先する。総合13分のうち、Phase3に最低3分を残せる上限。
 TIMEOUT_PHASE_2 = 90
 TIMEOUT_PHASE_3 = 5 * 60
