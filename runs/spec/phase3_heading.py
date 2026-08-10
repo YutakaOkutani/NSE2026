@@ -439,6 +439,35 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertEqual((args[0], args[2]), (87.0, 45.0))
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_right")
 
+    def test_phase5_direction_filter_updates_once_per_camera_sequence(self):
+        ctrl = _HeadingOnlyController()
+        ctrl._reset_phase45_camera_track()
+        ctrl.phase45_filtered_cone_dir = 0.20
+        snapshot = self._fresh_camera_snapshot(
+            cone_sequence=10,
+            cone_updated_at=100.0,
+            cone_probability=0.5,
+            cone_direction=0.90,
+        )
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.0):
+            ctrl._drive_phase5_camera(snapshot)
+        first_filtered = ctrl.phase45_filtered_cone_dir
+        first_command = ctrl.motor_commands[-1]
+
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.2):
+            ctrl._drive_phase5_camera(snapshot)
+
+        self.assertAlmostEqual(first_filtered, 0.704)
+        self.assertAlmostEqual(ctrl.phase45_filtered_cone_dir, first_filtered)
+        self.assertEqual(ctrl.motor_commands[-1], first_command)
+
+        next_snapshot = dict(snapshot, cone_sequence=11, cone_updated_at=100.4)
+        with patch.object(mtr_mgr_under_test.time, "time", return_value=100.4):
+            ctrl._drive_phase5_camera(next_snapshot)
+
+        self.assertGreater(ctrl.phase45_filtered_cone_dir, first_filtered)
+
     def test_phase5_approach_speed_decreases_with_red_occupancy(self):
         cases = (
             (0.0, PHASE5_BASE_SPEED),

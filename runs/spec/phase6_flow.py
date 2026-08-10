@@ -40,9 +40,32 @@ class _Phase6Controller:
 
 
 class Phase6FlowTest(unittest.TestCase):
-    def test_final_ram_duration_is_short_but_nonzero(self):
-        self.assertGreaterEqual(PHASE6_RAM_DURATION_SEC, 0.3)
-        self.assertLessEqual(PHASE6_RAM_DURATION_SEC, 0.5)
+    def test_final_ram_duration_is_full_goal_push(self):
+        self.assertEqual(PHASE6_RAM_DURATION_SEC, 2.5)
+
+    def test_cone_loss_during_final_ram_never_falls_back(self):
+        controller = _Phase6Controller()
+        handler = Phase6Handler()
+
+        with patch("mission.phases.p6.time.time", return_value=100.0):
+            handler.execute(controller, controller.st.snapshot())
+
+        controller.st.update_cone(
+            cone_probability=0.0,
+            cone_is_reached=False,
+            cone_valid=True,
+            cone_status="ok",
+            observation_time=101.0,
+            observation_accepted=True,
+        )
+        with patch("mission.phases.p6.time.time", return_value=101.0):
+            handler.execute(controller, controller.st.snapshot())
+
+        self.assertEqual(controller.st.snapshot()["phase"], int(Phase.PHASE6))
+        self.assertEqual(
+            controller.motor_commands[-1][1]["cmd_type"],
+            "phase6_final_ram",
+        )
 
     def test_final_ram_stops_before_transitioning_to_phase7(self):
         controller = _Phase6Controller()

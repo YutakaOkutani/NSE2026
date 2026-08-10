@@ -503,6 +503,7 @@ class MotorManager:
 
     def _reset_phase45_camera_track(self):
         self.phase45_filtered_cone_dir = None
+        self.phase45_filtered_cone_seq = None
         self.phase45_last_seen_time = None
 
     def _reset_phase4_search_cycle(self, now=None):
@@ -749,6 +750,7 @@ class MotorManager:
         self,
         raw_cone_direction,
         cone_seen,
+        cone_sequence=None,
         now=None,
     ):
         if not cone_seen:
@@ -758,6 +760,20 @@ class MotorManager:
         except (TypeError, ValueError):
             return getattr(self, "phase45_filtered_cone_dir", None)
         cdir = max(0.0, min(1.0, cdir))
+        try:
+            sequence = int(cone_sequence) if cone_sequence is not None else None
+        except (TypeError, ValueError):
+            sequence = None
+        update_time = time.time() if now is None else float(now)
+        if (
+            sequence is not None
+            and sequence == getattr(self, "phase45_filtered_cone_seq", None)
+        ):
+            # The motor loop runs much faster than the camera. Reusing one
+            # observation must not apply the EMA repeatedly and pull steering
+            # toward the same (possibly edge-clipped) centroid.
+            self.phase45_last_seen_time = update_time
+            return getattr(self, "phase45_filtered_cone_dir", None)
         prev = getattr(self, "phase45_filtered_cone_dir", None)
         if prev is None:
             filtered = cdir
@@ -765,7 +781,8 @@ class MotorManager:
             alpha = PHASE45_CONE_DIR_FILTER_ALPHA
             filtered = (1.0 - alpha) * float(prev) + alpha * cdir
         self.phase45_filtered_cone_dir = filtered
-        self.phase45_last_seen_time = time.time() if now is None else float(now)
+        self.phase45_filtered_cone_seq = sequence
+        self.phase45_last_seen_time = update_time
         return filtered
 
     @staticmethod
@@ -894,6 +911,7 @@ class MotorManager:
         filtered_direction = self._update_phase45_filtered_cone_dir(
             cone_direction,
             cone_seen,
+            cone_sequence=snapshot.get("cone_sequence"),
             now=now,
         )
         if not cone_seen:
