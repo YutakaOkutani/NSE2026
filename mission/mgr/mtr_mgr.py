@@ -14,6 +14,7 @@ from mission.const import (
     DEVICE_MOTOR_2_DIR,
     DEVICE_MOTOR_2_PWM,
     GPS_ACTIVE_DETECT,
+    GRASS_MIN_MOTOR_SPEED,
     MOTOR_IDLE_SLEEP,
     MOTOR_LOOP_INTERVAL,
     MOTOR_RAMP_STEP,
@@ -50,7 +51,11 @@ from mission.const import (
     PHASE45_CONE_DIR_FILTER_ALPHA,
     PHASE45_MOTOR_LOOP_INTERVAL,
     PHASE5_BASE_SPEED,
+    PHASE5_MID_OCCUPANCY_THRESHOLD,
+    PHASE5_MID_SPEED,
     PHASE5_MOTOR_RAMP_TIME,
+    PHASE5_NEAR_OCCUPANCY_THRESHOLD,
+    PHASE5_NEAR_SPEED,
     PHASE5_REACQUIRE_GRACE_SEC,
     PHASE5_REACQUIRE_INNER_SPEED,
     PHASE5_REACQUIRE_OUTER_SPEED,
@@ -771,10 +776,24 @@ class MotorManager:
             cone_probability = 0.0
         evidence = evaluate_cone_candidate(snapshot)
         return bool(
-            snapshot.get("cone_is_reached", False)
+            evidence["close_reached"]
             or cone_probability > float(threshold)
             or evidence["weak"]
         )
+
+    def _phase5_approach_speed(self, snapshot):
+        """Select a grass-safe approach speed from normalized red occupancy."""
+        debug = dict(snapshot.get("cone_debug", {}) or {})
+        occupancy = max(
+            self._snapshot_float(debug, "occupancy", 0.0),
+            self._snapshot_float(debug, "frame_red_occupancy", 0.0),
+        )
+        self.phase5_last_proximity_occupancy = occupancy
+        if occupancy >= float(PHASE5_NEAR_OCCUPANCY_THRESHOLD):
+            return self._clamp_percent(PHASE5_NEAR_SPEED)
+        if occupancy >= float(PHASE5_MID_OCCUPANCY_THRESHOLD):
+            return self._clamp_percent(PHASE5_MID_SPEED)
+        return self._clamp_percent(PHASE5_BASE_SPEED)
 
     def _drive_phase5_reacquire(self, now):
         """Continue a gentle corrective arc across a short detection gap."""
@@ -808,6 +827,9 @@ class MotorManager:
         """Apply one production Phase4 search/alignment motor decision."""
         now = time.time()
         if not self._camera_observation_fresh(snapshot, now):
+            self.stop_motors()
+            return
+        if evaluate_cone_candidate(snapshot)["close_reached"]:
             self.stop_motors()
             return
         self._phase4_new_snapshot_candidate(snapshot, now)
@@ -861,6 +883,9 @@ class MotorManager:
         if not self._camera_observation_fresh(snapshot, now):
             self.stop_motors()
             return
+        if evaluate_cone_candidate(snapshot)["close_reached"]:
+            self.stop_motors()
+            return
         cone_seen = self._phase45_cone_seen(
             snapshot,
             CONE_PROBABILITY_THRESHOLD_PHASE5,
@@ -880,11 +905,12 @@ class MotorManager:
             else CONE_CENTER_POSITION
         )
         error = steer_direction - CONE_CENTER_POSITION
+        approach_speed = self._phase5_approach_speed(snapshot)
         if abs(error) <= float(PHASE5_STEER_DEADBAND):
             self.set_motors(
-                PHASE5_BASE_SPEED,
+                approach_speed,
                 True,
-                PHASE5_BASE_SPEED,
+                approach_speed,
                 True,
                 ramp_time=PHASE5_MOTOR_RAMP_TIME,
                 cmd_type="phase5_approach_forward",
@@ -897,12 +923,12 @@ class MotorManager:
         )
         inner_speed = self._clamp_percent(
             max(
-                float(PHASE5_BASE_SPEED) - turn_delta,
-                float(PHASE5_BASE_SPEED) * 0.55,
+                float(GRASS_MIN_MOTOR_SPEED),
+                float(approach_speed) - turn_delta,
             )
         )
         outer_speed = self._clamp_percent(
-            float(PHASE5_BASE_SPEED) + turn_delta
+            float(approach_speed) + turn_delta
         )
         if error > 0.0:
             speed_left, speed_right = outer_speed, inner_speed

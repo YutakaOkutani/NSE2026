@@ -14,11 +14,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from mission.const import (
     CONE_PHASE4_CENTER_TOLERANCE,
-    CONE_PHASE4_CONFIRM_FRAMES,
     CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE,
-    CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD,
     CONE_PHASE5_REACH_CONFIRM_FRAMES,
-    CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD_PHASE4,
     CONE_PROBABILITY_THRESHOLD_PHASE5,
 )
@@ -174,26 +171,20 @@ def _debug_csv_record(detector, frame_idx, elapsed_sec, phase, phase_threshold, 
         "roi_support_ratio": diag["roi_support_ratio"],
         "phase": phase,
         "phase_threshold": phase_threshold,
-        "phase_reached_probability_threshold": max(
-            phase_threshold,
-            (
-                CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD
-                if phase == 4
-                else CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD
-            ),
-        ),
+        # close_reached_ok は近距離専用の品質判定を通過済みなので、
+        # Phase側では通常検出用の確率しきい値を重ねない。
+        "phase_reached_probability_threshold": 0.0,
         "phase_center_tolerance": CONE_PHASE4_CENTER_TOLERANCE if phase == 4 else 0.0,
         "phase_direction_tolerance": (
             CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE if phase == 4 else 0.0
         ),
         "phase_required_confirm_frames": (
-            CONE_PHASE4_CONFIRM_FRAMES if phase == 4 else CONE_PHASE5_REACH_CONFIRM_FRAMES
+            1 if phase == 4 else CONE_PHASE5_REACH_CONFIRM_FRAMES
         ),
         "is_detected_internal": diag["is_detected"],
     }
-    reached_threshold = record["phase_reached_probability_threshold"]
     record["is_reached_effective_by_phase"] = int(
-        bool(diag["is_reached"]) and diag["probability"] > reached_threshold
+        bool(diag["is_reached"])
     )
     centered = abs(diag["direction"] - 0.5) <= float(CONE_PHASE4_CENTER_TOLERANCE)
     record["is_phase_candidate"] = int(

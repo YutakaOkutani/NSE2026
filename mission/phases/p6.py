@@ -9,7 +9,14 @@ if not MAIN_PY_LIBRARY_DIR.exists():
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mission.const import DEVICE_LED_GREEN, DEVICE_LED_RED, PHASE6_RAM_DURATION_SEC, PHASE6_RAM_SPEED, Phase
+from mission.const import (
+    DEVICE_LED_GREEN,
+    DEVICE_LED_RED,
+    PHASE6_RAM_DURATION_SEC,
+    PHASE6_RAM_RAMP_TIME,
+    PHASE6_RAM_SPEED,
+    Phase,
+)
 from mission.phases.base import BasePhaseHandler
 
 
@@ -34,15 +41,20 @@ class Phase6Handler(BasePhaseHandler):
             controller.st.update_navigation(phase=int(Phase.PHASE7))
             return
 
+        elapsed = time.time() - getattr(controller, "phase6_start_time", 0.0)
+        if elapsed >= PHASE6_RAM_DURATION_SEC:
+            controller.stop_motors()
+            controller.st.update_navigation(phase=int(Phase.PHASE7))
+            return
+
         controller.set_motors(
             PHASE6_RAM_SPEED,
             True,
             PHASE6_RAM_SPEED,
             True,
+            ramp_time=PHASE6_RAM_RAMP_TIME,
             cmd_type="phase6_final_ram",
         )
-        if time.time() - getattr(controller, "phase6_start_time", 0.0) >= PHASE6_RAM_DURATION_SEC:
-            controller.st.update_navigation(phase=int(Phase.PHASE7))
 
 
 def run_standalone():

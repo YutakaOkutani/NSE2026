@@ -44,6 +44,7 @@ from mission.const import (
     PHASE5_BASE_SPEED,
     PHASE5_MOTOR_RAMP_TIME,
     PHASE5_TURN_CLAMP,
+    PHASE6_RAM_RAMP_TIME,
     PHASE6_RAM_SPEED,
     PIN_EN1,
     PIN_EN2,
@@ -190,8 +191,8 @@ _gps_arc_outer = min(100.0, float(PHASE3_GPS_ARC_BASE_SPEED) + _gps_arc_delta / 
 _gps_arc_inner = max(0.0, float(PHASE3_GPS_ARC_BASE_SPEED) - _gps_arc_delta / 2.0)
 _phase5_outer = min(100.0, float(PHASE5_BASE_SPEED) + float(PHASE5_TURN_CLAMP))
 _phase5_inner = max(
+    float(GRASS_MIN_MOTOR_SPEED),
     float(PHASE5_BASE_SPEED) - float(PHASE5_TURN_CLAMP),
-    float(PHASE5_BASE_SPEED) * 0.55,
 )
 _phase2_offset_outer = min(
     100.0,
@@ -326,7 +327,7 @@ PHASE_DRIVE_PROFILES = {
             "P6 production final straight ram; A/D are diagnostic turns.",
             _straight_only_commands(
                 PHASE6_RAM_SPEED,
-                DEFAULT_RAMP_TIME,
+                PHASE6_RAM_RAMP_TIME,
                 minimum_turn_speed=GRASS_MIN_MOTOR_SPEED,
             ),
         ),

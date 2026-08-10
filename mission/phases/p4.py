@@ -23,7 +23,6 @@ from mission.const import (
     CONE_PHASE4_BEARING_CONSISTENCY_TOLERANCE_DEG,
     CONE_PHASE4_CENTER_TOLERANCE,
     CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE,
-    CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD,
     CONE_PROBABILITY_THRESHOLD_PHASE4,
     DEVICE_LED_GREEN,
@@ -275,24 +274,15 @@ class Phase4Handler(BasePhaseHandler):
         current_snapshot = controller.st.snapshot()
         cone_prob = current_snapshot["cone_probability"]
         cone_dir = current_snapshot.get("cone_direction", CONE_CENTER_POSITION)
-        cone_reached = current_snapshot.get("cone_is_reached", False)
+        evidence = evaluate_cone_candidate(current_snapshot)
         now = time.time()
         camera_fresh, cone_sequence, _camera_age = self._fresh_camera_frame(current_snapshot, now)
-        cone_reached_effective = camera_fresh and bool(cone_reached) and (
-            cone_prob
-            > max(
-                CONE_PROBABILITY_THRESHOLD_PHASE4,
-                CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD,
-            )
+        cone_reached_effective = bool(
+            camera_fresh and evidence["close_reached"]
         )
         controller.cone_phase_decision = "p4_precheck"
         controller.cone_phase_threshold = float(CONE_PROBABILITY_THRESHOLD_PHASE4)
-        controller.cone_phase_reached_probability_threshold = float(
-            max(
-                CONE_PROBABILITY_THRESHOLD_PHASE4,
-                CONE_PHASE4_REACHED_PROBABILITY_THRESHOLD,
-            )
-        )
+        controller.cone_phase_reached_probability_threshold = 0.0
         controller.cone_phase_center_tolerance = float(CONE_PHASE4_CENTER_TOLERANCE)
         controller.cone_phase_direction_tolerance = float(
             CONE_PHASE4_DIRECTION_CONSISTENCY_TOLERANCE
@@ -363,6 +353,24 @@ class Phase4Handler(BasePhaseHandler):
             controller.cone_phase_decision = "p4_wait_new_frame"
             return
         controller.phase4_last_processed_cone_seq = cone_sequence
+        if cone_reached_effective:
+            controller.cone_phase_detected = True
+            controller.cone_phase_reached_effective = True
+            controller.cone_phase_centered = True
+            controller.cone_phase_direction_consistent = True
+            controller.cone_phase_confirm_count = 1
+            controller.cone_phase_required_confirm_frames = 1
+            controller.cone_phase_decision = "p4_close_reached_to_p5"
+            print("Phase4 -> Phase5: close_reached_ok detected")
+            controller.searching_flag = False
+            self._reset_strong_confirmation(controller)
+            self._reset_weak_confirmation(controller)
+            controller.phase4_candidate_active_until = 0.0
+            controller.phase5_last_processed_cone_seq = 0
+            controller.phase5_entry_reason = "phase4_close_reached"
+            controller.st.update_navigation(phase=int(Phase.PHASE5))
+            return
+
         # Phase4開始時は比較的近距離(数m)のため、誤検知低減のために
         # Phase5より厳しめのprobability + 数フレーム連続確認を要求する。
         try:
@@ -370,7 +378,6 @@ class Phase4Handler(BasePhaseHandler):
         except (TypeError, ValueError):
             cone_dir_val = CONE_CENTER_POSITION
         centered = abs(cone_dir_val - CONE_CENTER_POSITION) <= CONE_PHASE4_CENTER_TOLERANCE
-        evidence = evaluate_cone_candidate(current_snapshot)
         strict_detect = bool(centered and evidence["strict"])
         loose_detect = cone_prob > CONE_PROBABILITY_THRESHOLD
         weak_detect = bool(centered and evidence["weak"])

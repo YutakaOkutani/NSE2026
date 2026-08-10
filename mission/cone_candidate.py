@@ -58,6 +58,12 @@ def evaluate_cone_candidate(snapshot):
         bbox_bottom = (bbox_y + bbox_height) / max(frame_height, 1.0)
     penalty_flags = str(debug.get("penalty_flags", ""))
     strict_red_ok = bool(int(_float_value(debug.get("strict_red_ok", 0.0))))
+    # detector.is_reached の正式な意味は close_reached_ok。診断値も見ることで
+    # 保存ログや診断スナップショットでも同じ判断を再現できるようにする。
+    close_reached = bool(
+        int(_float_value(snapshot.get("cone_is_reached", 0.0)))
+        or int(_float_value(debug.get("close_reached_ok", 0.0)))
+    )
 
     tiny = 0.0 < occupancy < float(CAMERA_TINY_OCCUPANCY_THRESHOLD)
     credible_size = occupancy <= 0.0 or not tiny
@@ -96,6 +102,7 @@ def evaluate_cone_candidate(snapshot):
         "candidate": bool(strict or weak),
         "strict": strict,
         "weak": weak,
+        "close_reached": close_reached,
         "tiny": tiny,
         "probability": probability,
         "candidate_probability": candidate_probability,

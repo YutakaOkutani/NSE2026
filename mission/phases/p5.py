@@ -13,7 +13,6 @@ from mission.const import (
     CAMERA_DEAD_TIMEOUT,
     CAMERA_FRAME_STALE_STOP_SEC,
     CAMERA_PHASE5_MAX_ATTEMPTS,
-    CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
     CONE_PHASE5_REACH_CONFIRM_FRAMES,
     CONE_LOST_COUNT_LIMIT,
     CONE_PROBABILITY_THRESHOLD,
@@ -78,12 +77,7 @@ class Phase5Handler(BasePhaseHandler):
             controller.camera_phase5_start = controller.time_camera_start
         controller.cone_phase_decision = "p5_precheck"
         controller.cone_phase_threshold = float(CONE_PROBABILITY_THRESHOLD_PHASE5)
-        controller.cone_phase_reached_probability_threshold = float(
-            max(
-                CONE_PROBABILITY_THRESHOLD_PHASE5,
-                CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
-            )
-        )
+        controller.cone_phase_reached_probability_threshold = 0.0
         controller.cone_phase_center_tolerance = 0.0
         controller.cone_phase_direction_tolerance = 0.0
         controller.cone_phase_required_confirm_frames = int(CONE_PHASE5_REACH_CONFIRM_FRAMES)
@@ -126,18 +120,14 @@ class Phase5Handler(BasePhaseHandler):
                     f"Phase5 GPS fallback: target is {dist_m:.1f}m away (> {GPS_PHASE45_MAX_DISTANCE:.1f}m)",
                 )
                 return
-        is_reach = current_snapshot["cone_is_reached"]
-        # 近距離時はprobabilityが落ちても、到達判定が立っていれば見失い扱いにしない
+        # close_reached_ok は専用の近距離品質ゲートを通過済みなので、
+        # 一般候補の probability では再度ゲートしない。
         cone_prob = current_snapshot["cone_probability"]
         now = time.time()
         camera_fresh, cone_sequence = self._fresh_camera_frame(current_snapshot, now)
         evidence = evaluate_cone_candidate(current_snapshot)
-        is_reach_effective = camera_fresh and bool(is_reach) and (
-            cone_prob
-            > max(
-                CONE_PROBABILITY_THRESHOLD_PHASE5,
-                CONE_PHASE5_REACHED_PROBABILITY_THRESHOLD,
-            )
+        is_reach_effective = bool(
+            camera_fresh and evidence["close_reached"]
         )
         weak_detect = bool(camera_fresh and evidence["weak"])
         is_det = (

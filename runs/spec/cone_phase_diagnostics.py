@@ -51,9 +51,13 @@ class _VisionController:
         reached=False,
         observation_time=100.0,
         debug=None,
+        include_close_debug=True,
     ):
         if debug is None:
             debug = {"strict_red_ok": 1}
+        debug = dict(debug)
+        if reached and include_close_debug:
+            debug["close_reached_ok"] = 1
         self.st.update_cone(
             cone_direction=direction,
             cone_probability=probability,
@@ -280,28 +284,47 @@ class ConePhaseDiagnosticsTest(unittest.TestCase):
         self.assertEqual(ctrl.phase4_detect_confirm_count, 1)
         self.assertTrue(ctrl.cone_phase_decision.startswith("p4_track_hold_"))
 
-    def test_phase4_records_reached_signal_rejected_by_probability_gate(self):
+    def test_phase4_close_reached_bypasses_probability_and_enters_phase5(self):
         ctrl = _VisionController(Phase.PHASE4)
-        ctrl.update_cone_frame(direction=0.50, probability=0.08, reached=True)
+        ctrl.update_cone_frame(
+            direction=0.50,
+            probability=0.08,
+            reached=True,
+            debug={},
+            include_close_debug=False,
+        )
 
         with patch("mission.phases.p4.time.time", return_value=100.0):
             Phase4Handler().execute(ctrl, ctrl.st.snapshot())
 
-        self.assertEqual(ctrl.cone_phase_decision, "p4_no_detection")
-        self.assertFalse(ctrl.cone_phase_reached_effective)
-        self.assertEqual(ctrl.cone_phase_reached_probability_threshold, 0.28)
+        self.assertEqual(ctrl.cone_phase_decision, "p4_close_reached_to_p5")
+        self.assertTrue(ctrl.cone_phase_reached_effective)
+        self.assertEqual(ctrl.cone_phase_reached_probability_threshold, 0.0)
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE5))
 
-    def test_phase5_records_reached_signal_rejected_by_probability_gate(self):
+    def test_phase5_close_reached_bypasses_probability_and_confirms_twice(self):
         ctrl = _VisionController(Phase.PHASE5)
         ctrl.update_cone_frame(direction=0.50, probability=0.08, reached=True)
 
         with patch("mission.phases.p5.time.time", return_value=100.0):
             Phase5Handler().execute(ctrl, ctrl.st.snapshot())
 
-        self.assertEqual(ctrl.cone_phase_decision, "p5_cone_lost_counting")
-        self.assertFalse(ctrl.cone_phase_reached_effective)
-        self.assertEqual(ctrl.cone_phase_reached_probability_threshold, 0.30)
+        self.assertEqual(ctrl.cone_phase_decision, "p5_reached_confirm")
+        self.assertTrue(ctrl.cone_phase_reached_effective)
+        self.assertEqual(ctrl.cone_phase_reached_probability_threshold, 0.0)
         self.assertEqual(ctrl.cone_phase_required_confirm_frames, int(CONE_PHASE5_REACH_CONFIRM_FRAMES))
+
+        ctrl.update_cone_frame(
+            direction=0.50,
+            probability=0.08,
+            reached=True,
+            observation_time=100.2,
+        )
+        with patch("mission.phases.p5.time.time", return_value=100.2):
+            Phase5Handler().execute(ctrl, ctrl.st.snapshot())
+
+        self.assertEqual(ctrl.cone_phase_decision, "p5_reached_to_p6")
+        self.assertEqual(ctrl.st.snapshot()["phase"], int(Phase.PHASE6))
 
     def test_phase4_confirmation_counts_each_camera_sequence_once(self):
         ctrl = _VisionController(Phase.PHASE4)

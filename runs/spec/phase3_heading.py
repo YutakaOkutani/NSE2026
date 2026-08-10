@@ -16,7 +16,13 @@ spec.loader.exec_module(mtr_mgr_under_test)
 MotorManager = mtr_mgr_under_test.MotorManager
 
 
-from mission.const import PHASE4_SEARCH_OUTER_SPEED
+from mission.const import (
+    PHASE4_ALIGN_PIVOT_SPEED,
+    PHASE4_SEARCH_OUTER_SPEED,
+    PHASE5_BASE_SPEED,
+    PHASE5_MID_SPEED,
+    PHASE5_NEAR_SPEED,
+)
 from mission.motor_map import map_logical_wheels_to_physical
 
 class _HeadingOnlyController(MotorManager):
@@ -139,6 +145,21 @@ class Phase3HeadingTest(unittest.TestCase):
         self.assertTrue(args[1])
         self.assertTrue(args[3])
         self.assertEqual(kwargs["cmd_type"], "phase4_candidate_observe_arc")
+
+    def test_phase4_close_reached_stops_immediately(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase4_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=1.0,
+                cone_is_reached=True,
+                cone_debug={},
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (0.0, 0.0))
+        self.assertEqual(kwargs["cmd_type"], "stop")
 
     def test_phase4_tiny_single_frame_does_not_change_search_motor_command(self):
         ctrl = _HeadingOnlyController()
@@ -399,7 +420,7 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (58.0, 100.0))
+        self.assertEqual((args[0], args[2]), (45.0, 87.0))
         self.assertTrue(args[1])
         self.assertTrue(args[3])
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_left")
@@ -415,8 +436,51 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (100.0, 58.0))
+        self.assertEqual((args[0], args[2]), (87.0, 45.0))
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_steer_right")
+
+    def test_phase5_approach_speed_decreases_with_red_occupancy(self):
+        cases = (
+            (0.0, PHASE5_BASE_SPEED),
+            (0.04, PHASE5_MID_SPEED),
+            (0.10, PHASE5_NEAR_SPEED),
+        )
+        for occupancy, expected_speed in cases:
+            with self.subTest(occupancy=occupancy):
+                ctrl = _HeadingOnlyController()
+                ctrl._drive_phase5_camera(
+                    self._fresh_camera_snapshot(
+                        cone_probability=0.5,
+                        cone_direction=0.5,
+                        cone_debug={
+                            "strict_red_ok": 1,
+                            "occupancy": occupancy,
+                            "frame_red_occupancy": occupancy,
+                        },
+                    )
+                )
+
+                args, kwargs = ctrl.motor_commands[-1]
+                self.assertEqual(
+                    (args[0], args[2]),
+                    (float(expected_speed), float(expected_speed)),
+                )
+                self.assertEqual(kwargs["cmd_type"], "phase5_approach_forward")
+
+    def test_phase5_close_reached_stops_immediately(self):
+        ctrl = _HeadingOnlyController()
+
+        ctrl._drive_phase5_camera(
+            self._fresh_camera_snapshot(
+                cone_probability=1.0,
+                cone_is_reached=True,
+                cone_debug={},
+            )
+        )
+
+        args, kwargs = ctrl.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (0.0, 0.0))
+        self.assertEqual(kwargs["cmd_type"], "stop")
 
     def test_phase5_roi_supported_weak_candidate_remains_trackable(self):
         ctrl = _HeadingOnlyController()
@@ -442,7 +506,7 @@ class Phase3HeadingTest(unittest.TestCase):
         )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (80, 80))
+        self.assertEqual((args[0], args[2]), (45, 45))
         self.assertEqual(kwargs["cmd_type"], "phase5_approach_forward")
 
     def test_phase5_brief_loss_keeps_turning_toward_last_image_direction(self):
@@ -533,7 +597,7 @@ class Phase3HeadingTest(unittest.TestCase):
             )
 
         args, kwargs = ctrl.motor_commands[-1]
-        self.assertEqual((args[0], args[2]), (45, 70))
+        self.assertEqual((args[0], args[2]), (45, PHASE4_ALIGN_PIVOT_SPEED))
         self.assertEqual(kwargs["cmd_type"], "phase4_reacquire_last_candidate")
 
     def test_phase2_offset_hold_steers_back_to_relative_bno_heading(self):

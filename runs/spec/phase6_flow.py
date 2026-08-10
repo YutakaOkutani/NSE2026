@@ -1,0 +1,70 @@
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from mission.const import (
+    PHASE6_RAM_DURATION_SEC,
+    PHASE6_RAM_RAMP_TIME,
+    PHASE6_RAM_SPEED,
+    Phase,
+)
+from mission.phases.p6 import Phase6Handler
+from mission.st import CanSatState
+
+
+class _Phase6Controller:
+    def __init__(self):
+        self.devices = {}
+        self.st = CanSatState()
+        self.st.update_navigation(phase=int(Phase.PHASE6))
+        self.phase_entry_time = 1.0
+        self.phase6_entry_marker = None
+        self.phase6_start_time = None
+        self.mission_total_timeout_triggered = False
+        self.mission_end_reason = "GOAL_REACHED"
+        self.motor_commands = []
+
+    def set_motors(self, *args, **kwargs):
+        self.motor_commands.append((args, kwargs))
+
+    def stop_motors(self):
+        self.motor_commands.append(
+            ((0.0, True, 0.0, True), {"cmd_type": "stop"})
+        )
+
+
+class Phase6FlowTest(unittest.TestCase):
+    def test_final_ram_duration_is_short_but_nonzero(self):
+        self.assertGreaterEqual(PHASE6_RAM_DURATION_SEC, 0.3)
+        self.assertLessEqual(PHASE6_RAM_DURATION_SEC, 0.5)
+
+    def test_final_ram_stops_before_transitioning_to_phase7(self):
+        controller = _Phase6Controller()
+        handler = Phase6Handler()
+
+        with patch("mission.phases.p6.time.time", return_value=100.0):
+            handler.execute(controller, controller.st.snapshot())
+
+        args, kwargs = controller.motor_commands[-1]
+        self.assertEqual((args[0], args[2]), (PHASE6_RAM_SPEED, PHASE6_RAM_SPEED))
+        self.assertEqual(kwargs["ramp_time"], PHASE6_RAM_RAMP_TIME)
+        self.assertEqual(controller.st.snapshot()["phase"], int(Phase.PHASE6))
+
+        with patch(
+            "mission.phases.p6.time.time",
+            return_value=100.0 + PHASE6_RAM_DURATION_SEC,
+        ):
+            handler.execute(controller, controller.st.snapshot())
+
+        self.assertEqual(controller.motor_commands[-1][1]["cmd_type"], "stop")
+        self.assertEqual(controller.st.snapshot()["phase"], int(Phase.PHASE7))
+
+
+if __name__ == "__main__":
+    unittest.main()

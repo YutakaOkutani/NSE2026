@@ -9,7 +9,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mission.const import PHASE4_SEARCH_OUTER_SPEED
+from mission.const import (
+    PHASE4_ALIGN_PIVOT_SPEED,
+    PHASE4_SEARCH_OUTER_SPEED,
+    PHASE5_BASE_SPEED,
+    PHASE5_TURN_CLAMP,
+)
 
 MOTOR_DIAG_PATH = PROJECT_ROOT / "runs" / "diag" / "motor.py"
 spec = importlib.util.spec_from_file_location("motor_diag_under_test", MOTOR_DIAG_PATH)
@@ -122,7 +127,7 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
         )
         self.assertEqual(
             (phase4_align_left["speed_left"], phase4_align_left["speed_right"]),
-            (45.0, 70.0),
+            (45.0, float(PHASE4_ALIGN_PIVOT_SPEED)),
         )
         self.assertGreaterEqual(
             min(phase4_align_left["speed_left"], phase4_align_left["speed_right"]),
@@ -130,7 +135,10 @@ class MotorDiagnosticSafetyTest(unittest.TestCase):
         )
         self.assertEqual(
             (phase5_left["speed_left"], phase5_left["speed_right"]),
-            (58.0, 100.0),
+            (
+                45.0,
+                float(PHASE5_BASE_SPEED + PHASE5_TURN_CLAMP),
+            ),
         )
 
     def test_phase6_profile_uses_grass_safe_minimum_speed(self):

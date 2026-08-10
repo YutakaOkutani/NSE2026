@@ -1887,13 +1887,22 @@ class detector:
 
         legacy_prob = 0.0
 
+        # close_reached_ok has already passed the dedicated close-range color,
+        # shape, occupancy, ROI and ground gates.  Do not let the generic
+        # candidate penalties applied above erase that stronger conclusion.
+        if close_reached_ok:
+            prob = 1.0
+
         # Internal detection state must describe the final penalized score, not
-        # the pre-filter component score.
-        is_detected = bool(reached or prob >= self.min_detect_probability)
+        # the pre-filter component score.  Raw edge contact remains available
+        # as raw_reached diagnostics but is not a goal signal by itself.
+        is_detected = bool(
+            close_reached_ok or prob >= self.min_detect_probability
+        )
 
         # Candidate quality to resolve RGB/BGR ambiguity across camera setups.
         overall_score = (
-            (2.0 if reached else 0.0)
+            (2.0 if close_reached_ok else 0.0)
             + prob
             + 0.20 * min(frame_red_occupancy / 0.6, 1.0)
             + (0.04 if self.__roi_hist is not None and best_mode and "hybrid" in best_mode else 0.0)
@@ -1910,7 +1919,7 @@ class detector:
             "occupancy": occupancy,
             "frame_red_occupancy": frame_red_occupancy,
             "is_detected": is_detected,
-            "is_reached": reached,
+            "is_reached": close_reached_ok,
             "probability": prob,
             "debug_method": f"{variant_name}:{best_mode or 'none'}",
             "overall_score": overall_score,
@@ -2013,12 +2022,14 @@ class detector:
         self.detected = best["bbox"]
         raw_probability = float(best["probability"])
         self.probability = self.__temporal_stabilize_probability(raw_probability, best)
+        if bool(best.get("close_reached_ok", False)):
+            self.probability = 1.0
         self.centroids = np.array(best["centroid"], dtype=float) if best["centroid"] is not None else None
         self.cone_direction = float(best["cone_direction"])
         self.occupancy = float(best["occupancy"])
         self.frame_red_occupancy = float(best["frame_red_occupancy"])
         self.is_detected = bool(best["is_detected"])
-        self.is_reached = bool(best["is_reached"])
+        self.is_reached = bool(best.get("close_reached_ok", False))
         self.debug_method = best["debug_method"]
         self.debug_scores = {
             "schema_version": CONE_DIAGNOSTIC_SCHEMA_VERSION,
