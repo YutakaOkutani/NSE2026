@@ -556,7 +556,7 @@ python3 main.py
 ```bash
 cd ~/NSE2026
 pwd
-ls venv/bin/python
+ls /home/pi/venv/bin/python
 ```
 
 配布例はユーザー`pi`、配置先`/home/pi/NSE2026`を仮定している。異なる場合は、配置後の`User`、`Group`、`WorkingDirectory`、`ExecStart`を実環境に合わせて編集する。
@@ -645,7 +645,7 @@ sudo journalctl -u discord-ip.service -b
 #### 7. よくある起動失敗ポイント
 
 * `WorkingDirectory`または`ExecStart`が実際の配置と違う
-* `/home/pi/NSE2026/venv/bin/python`が存在しない
+* `/home/pi/venv/bin/python`が存在しない
 * unitの`User`または`Group`が実機のユーザーと違う
 * `mission.toml`または`discord.env`が作成されていない
 * 仮想環境に必要なライブラリが入っていない
