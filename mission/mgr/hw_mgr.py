@@ -40,10 +40,9 @@ from mission.const import (
     PIN_TRIG,
     PWM_FREQ,
     ROI_GLOB_PATTERNS,
-    ROI_PATH_1,
-    ROI_PATH_2,
     SONAR_MAX_DISTANCE,
 )
+from mission.paths import ROI_PRIMARY_REFERENCE
 
 
 class HardwareManager:
@@ -132,10 +131,12 @@ class HardwareManager:
         roi_images = []
         seen_paths = set()
         candidate_paths = []
-        for base_path in (ROI_PATH_1, ROI_PATH_2):
+        roi_path_1 = str(getattr(self, "roi_path_1", ROI_PRIMARY_REFERENCE))
+        roi_path_2 = str(getattr(self, "roi_path_2", roi_path_1))
+        for base_path in (roi_path_1, roi_path_2):
             if base_path and base_path not in candidate_paths:
                 candidate_paths.append(base_path)
-        roi_dir = os.path.dirname(ROI_PATH_1)
+        roi_dir = os.path.dirname(roi_path_1)
         for pattern in ROI_GLOB_PATTERNS:
             for path in sorted(glob.glob(os.path.join(roi_dir, pattern))):
                 if path not in candidate_paths:
@@ -202,10 +203,17 @@ class HardwareManager:
                 neg_count = sum(1 for item in roi_images if item["label"] == "negative")
                 print(f"Camera: using {len(roi_images)} ROI image(s) (positive={pos_count}, negative={neg_count})")
             else:
-                print(f"WARNING: ROI image not found at fixed path: {ROI_PATH_1}")
+                configured_roi_path = getattr(self, "roi_path_1", ROI_PRIMARY_REFERENCE)
+                print(f"WARNING: ROI image not found at configured path: {configured_roi_path}")
                 print("Switching to DEFAULT RED detection.")
             self.roi_img = roi_img
             self.roi_references = list(roi_images)
+            run_bundle = getattr(self, "run_bundle", None)
+            if run_bundle is not None:
+                try:
+                    run_bundle.snapshot_roi_inputs(self.roi_references)
+                except Exception as exc:
+                    print(f"WARNING: ROI input snapshot failed: {exc}")
             detector.set_roi_img(roi_images if roi_images else roi_img)
             detector.capture_reached_path = str(
                 getattr(self, "capture_reached_path", os.path.join(".", "log", "capture_reached.png"))

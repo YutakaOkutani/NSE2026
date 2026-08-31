@@ -5,9 +5,9 @@ Description=CanSat main mission
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/NSE2026
+WorkingDirectory=/home/pi/cansat-system
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/pi/venv/bin/python /home/pi/NSE2026/main.py
+ExecStart=/home/pi/venv/bin/python /home/pi/cansat-system/main.py
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15

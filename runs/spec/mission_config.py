@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mission.config import MissionConfigError, load_mission_config
+from mission.config import MissionConfigError, load_mission_config, load_run_context
 
 
 VALID_CONFIG = """
@@ -143,9 +143,11 @@ class MissionConfigTest(unittest.TestCase):
         captured = {}
 
         class FakeController:
-            def __init__(self, received_config, log_dir=None):
+            def __init__(self, received_config, run_context, log_dir=None):
                 captured["config"] = received_config
+                captured["run_context"] = run_context
                 captured["log_dir"] = log_dir
+                self.run_dir = "/tmp/cansat-test/run"
 
         fake_ctrl_module = types.ModuleType("mission.ctrl")
         fake_ctrl_module.CanSatController = FakeController
@@ -155,7 +157,55 @@ class MissionConfigTest(unittest.TestCase):
 
         self.assertIsInstance(controller, FakeController)
         self.assertIs(captured["config"], config)
+        self.assertEqual(captured["run_context"].event_id, "unclassified")
         self.assertEqual(captured["log_dir"], "/tmp/cansat-test")
+
+    def test_missing_run_context_uses_unclassified_metadata(self):
+        context = load_run_context("/does/not/exist/run-context.toml")
+        self.assertEqual(context.event_id, "unclassified")
+        self.assertEqual(context.run_kind, "mission")
+        self.assertIsNone(context.source)
+
+    def test_loads_structured_run_context(self):
+        path = self._write_config(
+            """
+[event]
+id = "nse2026"
+name = "NSE 2026"
+
+[run]
+kind = "competition"
+label = "attempt-1"
+location = "field-a"
+operator = "team"
+tags = ["dry", "final"]
+notes = "windy"
+"""
+        )
+        context = load_run_context(path)
+        self.assertEqual(context.event_id, "nse2026")
+        self.assertEqual(context.run_kind, "competition")
+        self.assertEqual(context.tags, ("dry", "final"))
+        self.assertEqual(context.notes, "windy")
+
+    def test_repository_run_context_example_is_valid(self):
+        context = load_run_context(PROJECT_ROOT / "run-context.toml.example")
+        self.assertEqual(context.event_id, "nse2026")
+        self.assertEqual(context.run_kind, "competition")
+
+    def test_run_context_rejects_unsafe_event_id(self):
+        path = self._write_config(
+            """
+[event]
+id = "NSE 2026/../../"
+name = "unsafe"
+
+[run]
+kind = "competition"
+"""
+        )
+        with self.assertRaisesRegex(MissionConfigError, "event.id"):
+            load_run_context(path)
 
     def test_target_constants_were_removed(self):
         from mission import const

@@ -7,11 +7,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from mission.paths import DEFAULT_TELEMETRY_ROOT
+
 
 DEFAULT_PC_HOST = "127.0.0.1"
 DEFAULT_PC_PORT = 5001
 DEFAULT_TX_HZ = 5.0
-DEFAULT_LOG_DIR = "/home/pi/logs_nse2026/telemetry_sbc"
+DEFAULT_LOG_DIR = str(DEFAULT_TELEMETRY_ROOT / "sbc")
 SCHEMA = "cansat.telemetry.v1"
 MAX_UDP_PAYLOAD_BYTES = 1200
 

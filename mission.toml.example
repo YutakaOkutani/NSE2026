@@ -1,5 +1,6 @@
 # Copy this file to mission.toml on each Raspberry Pi and edit it there.
 # mission.toml is intentionally ignored by Git.
+# Competition/run labels belong in run-context.toml, not in this control file.
 
 [target]
 # Deliberately invalid placeholders: mission startup fails until both are edited.

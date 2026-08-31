@@ -7,7 +7,8 @@
 | Area | Allowed change | Required constraint |
 | --- | --- | --- |
 | `main.py` | Production startup wiring only | Keep argument-free mission execution; validate before hardware import/init |
-| `mission/config.py` | Local config schema and validation | Reject missing, malformed, unknown, non-finite, or out-of-range values before hardware setup |
+| `mission/config.py` | Local control config and run-context schemas | Reject malformed or unknown values before hardware setup; keep run metadata behavior-neutral |
+| `mission/paths.py`, `mission/run_bundle.py` | Runtime data and provenance | Preserve unique run IDs, snapshots, and legacy analysis compatibility |
 | `mission/const.py` | Fixed airframe values, thresholds, budgets, schema | Add no per-mission secrets or target coordinates; pair behavioral values with tests/evidence |
 | `mission/st.py` | Shared state fields and atomic update/snapshot API | Update producers, consumers, logs, and tests together |
 | `mission/ctrl.py` | Lifecycle, dispatch, cumulative budgets, shutdown | Keep Phase algorithms and device protocols out |
@@ -26,7 +27,7 @@
 ## Protected surfaces
 
 - Do not modify root `README.md` while maintaining AI context. It is human-facing and has a separate role.
-- Do not commit `mission.toml`; it contains local mission values and is intentionally untracked.
+- Do not commit `mission.toml` or `run-context.toml`; they contain active local values and are intentionally untracked.
 - Do not edit `gerber/*.zip` unless the task explicitly concerns PCB fabrication.
 - Do not treat generated logs, images, analysis outputs, caches, or virtual environments as source.
 - Do not overwrite or normalize unrelated local changes.
@@ -40,6 +41,7 @@
 - Do not let telemetry, analysis, or a UI become required for mission control.
 - Do not add environment-variable or CLI overrides to production mission configuration.
 - Do not add airframe names, selectors, or configuration hierarchies.
+- Do not let event labels, notes, or output paths change control decisions.
 - Do not scatter numeric tuning values through handlers or diagnostics.
 - Do not use a stale retained measurement as valid merely because its number is nonzero.
 - Do not hide sensor, command, or log failures with silent broad exception handling.

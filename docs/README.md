@@ -13,6 +13,7 @@ Read only the shortest route that covers the task:
 5. Load a reference only when its trigger applies:
    - Physical hardware, GPIO, motors, Wi-Fi shutdown: [`reference/hardware-safety.md`](reference/hardware-safety.md)
    - `runs/telemetry/` or `runs/cam/relay_*`: [`reference/telemetry-contract.md`](reference/telemetry-contract.md)
+   - Competition policy, timing provenance, goal marker, or field assumptions: matching page under [`competitions/`](competitions/)
 6. Load [`maintenance/context-audit.md`](maintenance/context-audit.md) only when maintaining `docs/`.
 
 The numbered files are ordered context, not tutorials. Source code remains authoritative for implementation details and current numeric constants.
@@ -34,6 +35,8 @@ docs/
 ├── reference/
 │   ├── hardware-safety.md
 │   └── telemetry-contract.md
+├── competitions/
+│   └── nse2026.md
 ├── flowchart/
 │   └── .gitkeep
 ├── maintenance/
@@ -53,6 +56,7 @@ docs/
 | `06-debug-and-test-rules.md` | Diagnosis order, test tiers, E2E safety | Architecture explanation |
 | `07-mission-spec.md` | Mission state machine and phase intent | Full constant tables |
 | `reference/*` | High-risk or subsystem-specific contracts | General repository guidance |
+| `competitions/*` | Competition provenance and rule-derived assumptions | Full constant tables or runtime selection logic |
 | `flowchart/` | Reserved location for future source-controlled diagrams | Current mission specification |
 | `maintenance/context-audit.md` | Context value audit and refactor record | Runtime guidance |
 | Legacy alias pages | Preserve links from files outside the docs refactor scope | New information |

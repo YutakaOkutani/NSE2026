@@ -1,9 +1,10 @@
-from mission.config import load_mission_config
+from mission.config import load_mission_config, load_run_context
 from mission.const import Phase
 
 
 def _build_controller(log_dir=None):
     config = load_mission_config()
+    run_context = load_run_context()
     from mission.ctrl import CanSatController
 
     print(
@@ -12,7 +13,13 @@ def _build_controller(log_dir=None):
         f"radio={config.radio.control}; dry_run={int(config.radio.dry_run)}; "
         f"use_sudo={int(config.radio.use_sudo)}"
     )
-    return CanSatController(config, log_dir=log_dir)
+    print(
+        f"Run context: event={run_context.event_id}; kind={run_context.run_kind}; "
+        f"label={run_context.label or '-'}; source={run_context.source or 'default'}"
+    )
+    controller = CanSatController(config, run_context, log_dir=log_dir)
+    print(f"Run bundle: {controller.run_dir}")
+    return controller
 
 
 def run_full_mission(log_dir=None):

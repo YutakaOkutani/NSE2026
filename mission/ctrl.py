@@ -1,6 +1,4 @@
-import datetime
 import math
-import os
 import time
 import csv
 import threading
@@ -28,9 +26,6 @@ from mission.const import (
     HEADING_WEIGHT_GPS,
     GPS_HEADING_BASELINE_MIN_DIST,
     LED_SIGNAL_COUNT,
-    LOG_DIR,
-    LOG_FILE_DATETIME_FORMAT,
-    LOG_PREFIX,
     MAIN_LOOP_INTERVAL,
     MISSION_PHASE_TIME_BUDGETS,
     MISSION_PHASE_TIMEOUT_TRANSITIONS,
@@ -40,6 +35,8 @@ from mission.const import (
     PHASE2_OFFSET_LEG_MAX_TIME,
     PHASE2_STAGE_ESCAPE,
     PHASE2_OFFSET_MODE_COLLECT,
+    ROI_PATH_1,
+    ROI_PATH_2,
     Phase,
 )
 from mission.mgr import HardwareManager, LedManager, MotorManager, RadioManager, SensorManager
@@ -54,46 +51,28 @@ from mission.phases import (
     Phase7Handler,
 )
 from mission.st import CanSatState
+from mission.run_bundle import create_run_bundle
 
 
 class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager, RadioManager):
-    @staticmethod
-    def _build_run_stem(now_time):
-        return LOG_PREFIX + now_time.strftime(LOG_FILE_DATETIME_FORMAT) + f"-{now_time.microsecond:06d}"
-
-    @classmethod
-    def _build_unique_log_path(cls, log_root, now_time):
-        run_stem = cls._build_run_stem(now_time)
-        log_path = os.path.join(log_root, run_stem + ".csv")
-        if not os.path.exists(log_path):
-            return log_path, run_stem
-        suffix = 1
-        while True:
-            candidate_stem = f"{run_stem}-{suffix}"
-            candidate = os.path.join(log_root, candidate_stem + ".csv")
-            if not os.path.exists(candidate):
-                return candidate, candidate_stem
-            suffix += 1
-
-    def __init__(self, mission_config, log_dir=None):
+    def __init__(self, mission_config, run_context, log_dir=None):
         self.st = CanSatState()
         self.mission_config = mission_config
+        self.run_context = run_context
         self.target_lat = mission_config.target.latitude
         self.target_lng = mission_config.target.longitude
         self.radio_config = mission_config.radio
         self.camera_control_invert_x = bool(CAMERA_CONTROL_INVERT_X)
+        self.roi_path_1 = ROI_PATH_1
+        self.roi_path_2 = ROI_PATH_2
 
-        # ログCSVは用途別ディレクトリ直下へ実行単位のファイル名で保存する。
-        resolved_log_dir = str(log_dir) if log_dir is not None else LOG_DIR
-        now_time = datetime.datetime.now()
-        os.makedirs(resolved_log_dir, exist_ok=True)
-        self.log_path, self.run_stem = self._build_unique_log_path(resolved_log_dir, now_time)
-        self.run_dir = resolved_log_dir
-        self.capture_reached_path = os.path.join(self.run_dir, self.run_stem + "_capture_reached.png")
-        self.camera_evidence_dir = os.path.join(
-            self.run_dir,
-            self.run_stem + "_camera",
-        )
+        self.run_bundle = create_run_bundle(mission_config, run_context, log_root=log_dir)
+        self.run_id = self.run_bundle.run_id
+        self.run_stem = self.run_id
+        self.run_dir = str(self.run_bundle.run_dir)
+        self.log_path = str(self.run_bundle.log_path)
+        self.capture_reached_path = str(self.run_bundle.reached_image_path)
+        self.camera_evidence_dir = str(self.run_bundle.camera_dir)
 
         self.devices = {key: None for key in DEVICE_KEYS}
         self.i2c_lock = threading.RLock()
@@ -298,6 +277,12 @@ class CanSatController(HardwareManager, SensorManager, MotorManager, LedManager,
         except Exception as exc:
             print(f"Hardware shutdown failed: {exc}")
         self._write_final_log_row()
+        run_bundle = getattr(self, "run_bundle", None)
+        if run_bundle is not None:
+            try:
+                run_bundle.finalize(self.mission_end_reason)
+            except Exception as exc:
+                print(f"Run manifest finalize failed: {exc}")
 
     def transition_to_give_up(self, reason):
         """Enter the safe terminal phase without passing through approach/final ram."""

@@ -24,7 +24,8 @@ Do not trade a higher item for a lower item without an explicit requirement and 
 - Bound every retry, recovery loop, reverse transition, and external command.
 - Make shutdown idempotent and reachable from every exception path.
 - Make control decisions reproducible from structured logs.
-- Keep field tuning local: fixed airframe values in `mission/const.py`, per-mission values in untracked `mission.toml`.
+- Keep configuration responsibilities explicit: fixed airframe/control values in `mission/const.py`, target/radio values in untracked `mission.toml`, and non-control event/run notes in untracked `run-context.toml`.
+- Treat competition-derived rules and field tuning as provenance-bearing current behavior, not universal CanSat defaults; record their origin under `docs/competitions/`.
 - Move CPU-heavy visualization and retrospective inference to `analysis/` or the PC side.
 
 ## Change acceptance

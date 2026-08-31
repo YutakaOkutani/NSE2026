@@ -1,4 +1,6 @@
-# NSE2026
+# cansat-system
+
+単一のCanSat機体を安全に運用し、競技・試走・ベンチ試験の証跡を再現可能な形で保存する制御システム。現在の制御値はNSE2026で検証されたミッションを基準としており、大会固有の前提は[`docs/competitions/nse2026.md`](docs/competitions/nse2026.md)に記録する。
 
 ## 1. 環境構築の準備
 
@@ -387,8 +389,8 @@ sudo i2cdetect -y 1
 ## 5. リポジトリのクローン
 
 ```bash
-git clone https://github.com/YutakaOkutani/NSE2026
-cd NSE2026
+git clone https://github.com/YutakaOkutani/cansat-system.git
+cd cansat-system
 ```
 
 ---
@@ -398,7 +400,7 @@ cd NSE2026
 各 Raspberry Pi で、リポジトリ直下に `mission.toml` を作成し、その日のゴール座標と無線設定を記入する。このファイルはGit管理外なので、座標変更のコミットは不要。
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 cp mission.toml.example mission.toml
 nano mission.toml
 ```
@@ -408,6 +410,25 @@ nano mission.toml
 `main.py` は座標を引数、環境変数、`mission/const.py` から取得しない。`mission.toml` がない、必須項目がない、型や範囲が不正、未知の項目がある場合は、ハードウェアを初期化せず終了する。起動前に必ず採用座標を確認する。
 
 `mission.toml.example`の座標は意図的に範囲外にしてあり、コピーしただけでは起動できない。実機ではPython 3.11以降を使用する。
+
+### 5.1.1 実行コンテキストの作成
+
+大会名、試走種別、場所、担当者、タグ、自由記述は制御設定と分離し、必要に応じて`run-context.toml`へ記入する。このファイルがなくても`unclassified/mission`として実行でき、制御動作は変わらない。
+
+```bash
+cp run-context.toml.example run-context.toml
+nano run-context.toml
+```
+
+`run-context.toml`はGit管理外である。各実行の開始時に内容がrunディレクトリへコピーされるため、大会や試走を切り替える前に更新する。
+
+### 5.1.2 実行データ
+
+本番CSV、カメラ証跡、設定スナップショット、実行manifest、任意メモは`~/cansat-data/runs/<event-id>/<run-kind>/<run-id>/`へ保存される。カメラ・部分E2E・テレメトリの生成物も`~/cansat-data`を共通基底とする。リポジトリ内の`analysis/robust_logs/`は過去形式の解析互換用であり、新規ログの保存先ではない。
+
+コーン検出用ROI参照画像は生成ログではなく制御入力なので、リポジトリ内の`assets/roi/`へ配置する。実行時に使用された参照画像はrunディレクトリの`inputs/roi/`へハッシュ付きで複製される。
+
+既存環境から更新する場合は、以前使用していたROI参照画像だけを`assets/roi/`へコピーし、試し撮りや実行ログを混ぜない。最低限の主参照画像名は`captured_roi_img.png`である。
 
 ---
 
@@ -422,7 +443,7 @@ nano mission.toml
 ## 5.3 実行
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 source venv/bin/activate
 python3 main.py
 ```
@@ -503,7 +524,7 @@ rpicam-still --width 2592 --height 1944 -o maxres.jpg
 # このコマンドで tmux セッション内に main.py を起動する。SSH が切れても tmux セッションが残るので実行継続できる
 # ※ 重要: `python3 main.py` を tmux の外で起動すると、SSH切断時に一緒に止まる可能性がある
 # ※ 重要: これは「SSH切断対策」。ラズパイの再起動/電源断まで含めて継続したい場合は、下の systemd 設定を使う
-cd ~/NSE2026
+cd ~/cansat-system
 tmux new-session -d -s cansat 'bash -lc "source venv/bin/activate && exec python3 main.py"'
 
 # ログ/画面を確認したいときに接続（アタッチ）
@@ -522,7 +543,7 @@ tmux ls
 
 ```bash
 # ===== 対話的に起動する方法（手動操作したい場合） =====
-cd ~/NSE2026
+cd ~/cansat-system
 tmux new -s cansat
 source venv/bin/activate
 python3 main.py
@@ -554,17 +575,17 @@ python3 main.py
 #### 1. 実機のパスを確認する
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 pwd
 ls /home/pi/venv/bin/python
 ```
 
-配布例はユーザー`pi`、配置先`/home/pi/NSE2026`を仮定している。異なる場合は、配置後の`User`、`Group`、`WorkingDirectory`、`ExecStart`を実環境に合わせて編集する。
+配布例はユーザー`pi`、配置先`/home/pi/cansat-system`を仮定している。異なる場合は、配置後の`User`、`Group`、`WorkingDirectory`、`ExecStart`を実環境に合わせて編集する。実行データは配置先とは独立して`~/cansat-data`へ保存される。
 
 #### 2. unitファイルを配置する
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 sudo install -m 0644 deploy/systemd/cansat.service.example /etc/systemd/system/cansat.service
 sudo install -m 0644 deploy/systemd/cansat.timer.example /etc/systemd/system/cansat.timer
 sudo install -m 0644 deploy/systemd/discord-ip.service.example /etc/systemd/system/discord-ip.service
@@ -666,7 +687,7 @@ sudo journalctl -u discord-ip.service -b
 `main` へマージ済みの本番コードを更新する場合:
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 
 # 更新中の自動起動と実行中コードを止め、現在のブランチと変更状態を確認
 sudo systemctl stop cansat.timer cansat.service
@@ -694,7 +715,7 @@ sudo systemctl status cansat.timer cansat.service
 Pull Requestをマージする前など、実機で作業ブランチを確認する場合:
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 sudo systemctl stop cansat.timer cansat.service
 git status --short --branch
 git fetch origin
@@ -736,7 +757,7 @@ Discordの対象チャンネルで「Server Settings」→「Integrations」→�
 #### 2. 通知設定を作成する
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 cp discord.env.example discord.env
 nano discord.env
 chmod 600 discord.env
@@ -749,7 +770,7 @@ chmod 600 discord.env
 スクリプトを直接実行する場合:
 
 ```bash
-cd ~/NSE2026
+cd ~/cansat-system
 ./scripts/discord_ip.sh
 ```
 

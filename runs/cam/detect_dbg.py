@@ -20,6 +20,7 @@ from mission.const import (
     CONE_PROBABILITY_THRESHOLD_PHASE5,
 )
 from mission.mgr.hw_mgr import HardwareManager
+from mission.paths import DEFAULT_DEBUG_ROOT
 from lib import cone_detect as dc
 from lib.cone_diagnostics import (
     CONE_DIAGNOSTIC_KEYS,
@@ -27,7 +28,7 @@ from lib.cone_diagnostics import (
     normalize_cone_diagnostics,
 )
 
-DEFAULT_OUT_BASE = Path("/home/pi/logs_nse2026")
+DEFAULT_OUT_BASE = DEFAULT_DEBUG_ROOT
 WINDOW_NAME = "Detector Debug (Production cone_detect.py)"
 
 DEBUG_CSV_BASE_FIELDS = [
@@ -120,7 +121,7 @@ def build_parser():
         "--outdir",
         type=str,
         default="",
-        help="Output directory. Default: /home/pi/logs_nse2026/camera_debug/<timestamp>.",
+        help=f"Output directory. Default: {DEFAULT_OUT_BASE}/camera/<timestamp>.",
     )
     return parser
 
@@ -128,7 +129,7 @@ def build_parser():
 def _make_run_outdir(base_dir: Path) -> Path:
     ts = time.strftime("%Y%m%d_%H%M%S")
     subsec = int((time.time() % 1.0) * 1000)
-    camera_debug_dir = base_dir / "camera_debug"
+    camera_debug_dir = base_dir / "camera"
     outdir = camera_debug_dir / f"{ts}_{subsec:03d}"
     suffix = 0
     while outdir.exists():

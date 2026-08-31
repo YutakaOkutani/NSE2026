@@ -2,6 +2,8 @@ import os
 from enum import IntEnum
 
 from lib.cone_diagnostics import CONE_DIAGNOSTIC_LOG_COLUMNS
+from mission.paths import DEFAULT_RUNS_ROOT, ROI_CAPTURE_DIR as RUNTIME_ROI_CAPTURE_DIR
+from mission.paths import ROI_PRIMARY_REFERENCE, ROI_REFERENCE_DIR as VERSIONED_ROI_REFERENCE_DIR
 
 
 # 定数定義
@@ -16,11 +18,15 @@ class Phase(IntEnum):
     PHASE6 = 6
     PHASE7 = 7
 
-# ログ関連定数
-LOG_DIR = "/home/pi/logs_nse2026/mission"
+# ログ関連定数。新規実行は run bundle を作成するため、LOG_DIR は互換用の基底値。
+LOG_DIR = str(DEFAULT_RUNS_ROOT)
 LOG_PREFIX = "robust_log_"
 LOG_FILE_DATETIME_FORMAT = "%Y-%m%d-%H%M%S"
+MISSION_LOG_SCHEMA_VERSION = 1
 
+# 大会／ミッション固有の制御契約。
+# 現在値はNSE2026で検証された現行ミッションを表し、由来は
+# docs/competitions/nse2026.md に記録する。大会間で暗黙に共通扱いしない。
 # タイムアウトと動作関連定数
 TIMEOUT_PHASE_0 = 2 * 60
 TIMEOUT_PHASE_1 = 10
@@ -196,12 +202,12 @@ CAMERA_MIXED_CONFIRM_FRAMES = 3
 CAMERA_WEAK_CONFIRM_FRAMES = 3
 CAMERA_WEAK_MAX_MISSED_FRAMES = 2
 
-# ROI画像パス
+# ROI画像パス。参照画像はバージョン管理対象の制御入力、capturesは生成物。
 # 検知用の参照画像と roi_capture.py のタイムスタンプ付き撮影画像は
 # 別ディレクトリに保存し、試し撮りが検知入力に混ざらないようにする。
-ROI_REFERENCE_DIR = "/home/pi/logs_nse2026/roi"
-ROI_CAPTURE_DIR = os.path.join(ROI_REFERENCE_DIR, "captures")
-ROI_PATH_1 = os.path.join(ROI_REFERENCE_DIR, "captured_roi_img.png")
+ROI_REFERENCE_DIR = str(VERSIONED_ROI_REFERENCE_DIR)
+ROI_CAPTURE_DIR = str(RUNTIME_ROI_CAPTURE_DIR)
+ROI_PATH_1 = str(ROI_PRIMARY_REFERENCE)
 # 後方互換のため残すが、実体は同一ファイルを指す
 ROI_PATH_2 = ROI_PATH_1
 ROI_GLOB_PATTERNS = (
@@ -303,7 +309,7 @@ MOTOR_LOOP_INTERVAL = 0.05
 MOTOR_IDLE_SLEEP = 0.1
 MOTOR_RAMP_TIME = 0.6
 MOTOR_RAMP_STEP = 0.05
-# 現行機体のモーター配線・個体差に合わせた固定値。
+# 機体固有値: 現行単一機体のモーター配線・個体差に合わせた固定値。
 MOTOR_DIR_INVERT_1 = True
 MOTOR_DIR_INVERT_2 = False
 # 実機配線では物理MTR1が右輪、物理MTR2が左輪。
@@ -332,7 +338,7 @@ LED_TIMEOUT_ALERT_FAST_SLEEP = 0.08
 
 RADIO_COMMAND_TIMEOUT_SEC = 10.0
 
-# モーター・センサーのGPIO関連定数
+# 機体固有値: モーター・センサーのGPIO関連定数
 # Physical motor channels (fixed wiring): MTR1=RIGHT, MTR2=LEFT
 PIN_EN1 = 12
 PIN_PH1 = 13
@@ -542,6 +548,8 @@ PHASES_CAMERA_ACTIVE = (Phase.PHASE4, Phase.PHASE5)
 
 # ログのヘッダー
 LOG_HEADER = [
+    "LogSchemaVersion",
+    "RunId",
     "ElapsedSec",
     "Phase",
     "Phase0ExitReason",

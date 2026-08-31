@@ -9,7 +9,7 @@
 - Put hardware initialization, polling, retries, normalization, and actuation in the matching Manager.
 - Put device-protocol or reusable detector details in `lib/`.
 - Put pure navigation math in `mission/nav.py`; put GPS transport/parsing helpers in `mission/gps_util.py`.
-- Put fixed airframe and control values in `mission/const.py`; put per-mission target/radio values only in `mission.toml`.
+- Put fixed airframe and active control values in `mission/const.py`; put per-mission target/radio values only in `mission.toml`; put behavior-neutral run metadata only in `run-context.toml`.
 - Put hardware-free regression tests in `runs/spec/`, device diagnostics in `runs/diag/`, and partial production runs in `runs/orch/`.
 
 ## State and concurrency
@@ -46,6 +46,7 @@
 - Validate all configuration before importing/constructing hardware-dependent control.
 - Reject unknown keys; do not silently accept misspelled configuration.
 - Keep `mission.toml.example` deliberately non-runnable until target coordinates are edited.
+- Validate structured run metadata, sanitize directory identifiers, and snapshot it without treating a missing file as a control failure.
 - Do not restore legacy target constants, environment variables, or production CLI overrides.
 - When changing a timing constant, inspect both local Phase timeout and controller cumulative budget.
 - When changing motor mapping or trim, update and run the motor safety specs before any bench run.
@@ -53,9 +54,10 @@
 ## Logs and analysis
 
 - Treat `LOG_HEADER` and `_build_log_row()` as one ordered schema.
-- Change header, row builder, `runs/spec/log_schema.py`, and affected `analysis/` consumers atomically.
+- Change schema version, header, row builder, `runs/spec/log_schema.py`, and affected `analysis/` consumers atomically.
 - Log reason, unit, validity/freshness, and terminal semantics; avoid unbounded debug strings.
 - Flush the primary mission record often enough to survive power loss; do not add heavy analysis to the log thread.
+- Keep one run's manifest, snapshots, CSV, camera evidence, reached image, notes, and analysis together; retain legacy flat-log readers.
 - Keep standard output concise and rate-limited inside fast loops.
 
 ## Errors and cleanup

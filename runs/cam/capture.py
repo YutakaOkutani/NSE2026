@@ -5,9 +5,14 @@ from pathlib import Path
 
 from picamera2 import Picamera2
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_DIR = Path("/home/pi/logs_nse2026")
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from mission.paths import DEFAULT_CAPTURE_ROOT
+
+
+DEFAULT_OUTPUT_DIR = DEFAULT_CAPTURE_ROOT
 
 
 def build_parser():
@@ -38,8 +43,8 @@ def build_parser():
         "--outdir",
         default=str(DEFAULT_OUTPUT_DIR),
         help=(
-            "Base output directory (default: /home/pi/logs_nse2026). "
-            "Artifacts are saved under capture/<timestamp>."
+            f"Base output directory (default: {DEFAULT_OUTPUT_DIR}). "
+            "Artifacts are saved under camera/<timestamp>."
         ),
     )
     parser.add_argument(
@@ -87,7 +92,7 @@ def main():
 
         ts = time.strftime("%Y%m%d_%H%M%S")
         session_suffix = f"_{args.session_name}" if args.session_name else ""
-        outdir = base_outdir / "capture" / f"{ts}{session_suffix}"
+        outdir = base_outdir / "camera" / f"{ts}{session_suffix}"
         outdir.mkdir(parents=True, exist_ok=True)
         print(f"Run folder: {outdir}")
 

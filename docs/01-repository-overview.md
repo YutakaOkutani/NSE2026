@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | `main.py` | Validate startup arguments and invoke the full mission | Production startup changes only |
 | `mission/` | Production state, orchestration, decisions, hardware management | Any flight/drive behavior change |
+| `mission/paths.py`, `mission/run_bundle.py` | Runtime data root, run identity, manifests, and snapshots | Data layout or provenance changes |
 | `mission/phases/` | Phase-local mission decisions and transitions | One phase's strategy changes |
 | `mission/mgr/` | Hardware lifecycle, sensor acquisition, actuators, radio | Physical I/O or continuous control changes |
 | `lib/` | Low-level sensor and vision adapters | Device protocol or detector implementation changes |
@@ -28,10 +29,11 @@
 | `deploy/systemd/` | Deployment examples | Boot/runtime integration changes |
 | `scripts/` | Host operational helpers | Non-mission host automation |
 | `gerber/` | Released PCB fabrication archive | Board-specific task with explicit authority only |
+| `assets/roi/` | Versioned detector reference inputs | Approved ROI reference changes |
 | `docs/` | AI decision context | Architecture/rule changes only |
 | `README.md` | Human overview, setup, and execution | Human documentation task only |
 
-Generated logs, captures, analysis outputs, local virtual environments, and `mission.toml` are runtime artifacts, not source modules.
+Generated logs, captures, analysis outputs, local virtual environments, `mission.toml`, and `run-context.toml` are runtime artifacts, not source modules. ROI references under `assets/roi/` are versioned control inputs, not generated captures.
 
 ## Task routing
 
@@ -40,7 +42,8 @@ Generated logs, captures, analysis outputs, local virtual environments, and `mis
 | Phase transition or timeout | `mission/phases/`, `mission/ctrl.py`, `mission/const.py` | `02` through `07` |
 | Sensor validity or freshness | `mission/mgr/sns_mgr.py`, `mission/st.py`, `lib/` | `02` through `07`, hardware reference |
 | Motor behavior or direction | `mission/mgr/mtr_mgr.py`, `mission/motor_map.py`, `mission/const.py` | `02` through `07`, hardware reference |
-| Configuration | `mission/config.py`, `mission.toml.example` | `02` through `06` |
+| Configuration or run metadata | `mission/config.py`, `mission.toml.example`, `run-context.toml.example` | `02` through `06` |
+| Runtime data layout | `mission/paths.py`, `mission/run_bundle.py`, `analysis/log_selector.py` | `02` through `06` |
 | Log schema | `mission/const.py`, `mission/mgr/sns_mgr.py`, `analysis/`, `runs/spec/log_schema.py` | `02` through `07` |
 | Vision | `lib/cone_detect.py`, Phase 4/5, camera thread, `runs/cam/` | `02` through `07` |
 | Telemetry | `runs/telemetry/` | `02` through `06`, telemetry reference |
@@ -50,6 +53,8 @@ Generated logs, captures, analysis outputs, local virtual environments, and `mis
 
 - Use `mission/const.py` for current hardware pins, thresholds, timing, phase budgets, log columns, and fixed single-airframe values.
 - Use `mission/config.py` and `mission.toml.example` for the local configuration contract.
+- Use `run-context.toml.example` for non-control event/run metadata and `mission/run_bundle.py` for immutable run evidence.
+- Use `docs/competitions/` only for competition provenance and rule-derived assumptions; source and tests remain authoritative for behavior.
 - Use `mission/phases/p0.py` through `p7.py` for current phase decisions.
 - Use `mission/mgr/` for actual sensor, actuator, and radio behavior.
 - Use `runs/spec/` for locked behavioral expectations.

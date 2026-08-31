@@ -23,7 +23,8 @@ Do not bypass this flow in production changes.
 
 | Module | Owns | Must not own |
 | --- | --- | --- |
-| `mission/config.py` | Strict `mission.toml` parsing and immutable config objects | Hardware initialization or fallback defaults |
+| `mission/config.py` | Strict local control/run-context parsing and immutable config objects | Hardware initialization or control decisions from metadata |
+| `mission/paths.py`, `mission/run_bundle.py` | Runtime data layout, run identity, metadata/config snapshots | Phase decisions or hardware policy |
 | `mission/const.py` | Single-airframe pins, tuning, timing, budgets, schema constants | Target coordinates or runtime secrets |
 | `mission/run.py` | Full, range, and single-Phase controller entry functions | Phase strategy or CLI parsing |
 | `mission/ctrl.py` | Controller construction, lifecycle, dispatch, cumulative timeout, shutdown | Device protocol or Phase-local algorithms |
@@ -117,7 +118,10 @@ Hardware access, retries, and actuator safety belong here even when only one Pha
 - The mission CSV is the primary reconstruction record; standard output is an operator aid.
 - Keep the header and serialized row ordered as one schema contract.
 - Log decision inputs, validity/freshness, command type, transition/termination reason, and time.
-- Keep the reached image beside the mission CSV using the same run stem.
+- Give every execution a unique run ID and keep its CSV, reached image, camera evidence, manifest, configuration snapshot, and optional notes in one run directory.
+- Keep control configuration in `mission.toml` and non-control competition/run metadata in `run-context.toml`; snapshot both without making metadata affect behavior.
+- Keep versioned ROI references outside generated-data trees and snapshot the inputs actually used by a run.
+- Let analysis consume both run bundles and legacy `robust_log_*.csv`; place new analysis output inside its source bundle.
 - Keep offline analysis outside the control process.
 
 ## AI Checklist

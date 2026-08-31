@@ -6,7 +6,7 @@
 
 Use evidence in this order:
 
-1. Identify the observed Phase, last motor command, transition/terminal reason, and elapsed time from the mission CSV.
+1. Identify the run manifest, software revision, observed Phase, last motor command, transition/terminal reason, and elapsed time from the mission CSV.
 2. Check validity, freshness, sequence, and recovery fields for the sensors used by that decision.
 3. Reconstruct the exact handler and Manager path; do not tune a threshold before locating the failed contract.
 4. Reproduce the decision with a `runs/spec/` fake when physical I/O is not essential.
@@ -80,7 +80,7 @@ Add a new focused spec when no row owns the changed boundary.
 
 ## Evidence standard
 
-- Preserve the failing log or input fixture.
+- Preserve the complete failing run bundle or legacy log and its input fixture.
 - State the causal chain: observation -> validity -> decision -> command/transition -> terminal result.
 - For threshold changes, compare before/after evidence across more than one sample when possible.
 - Record which test tier passed and which hardware-dependent tier was not run.

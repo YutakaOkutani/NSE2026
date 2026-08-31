@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import argparse
-from datetime import datetime
 from pathlib import Path
 
 import matplotlib
@@ -32,13 +31,26 @@ try:
 except Exception:
     LOG_HEADER = []
 
-from analysis.log_selector import find_latest_log, resolve_log_path
+from analysis.log_selector import (
+    create_analysis_output_dir,
+    find_latest_log,
+    load_run_manifest,
+    resolve_log_path,
+)
 
 COLUMN_GROUPS = [
     {
         "key": "time_and_phase",
         "title": "Time & Mission Phase",
-        "cols": ["ElapsedSec", "Phase", "MissionElapsedSec", "MissionEndReason", "MissionTotalTimeout"],
+        "cols": [
+            "LogSchemaVersion",
+            "RunId",
+            "ElapsedSec",
+            "Phase",
+            "MissionElapsedSec",
+            "MissionEndReason",
+            "MissionTotalTimeout",
+        ],
     },
     {
         "key": "imu_accel",
@@ -197,10 +209,20 @@ ANOMALY_HIGHLIGHT_MAX_RATE = 0.80
 
 
 def write_analysis_context(out_dir: Path, *, log_path: Path) -> None:
+    manifest = load_run_manifest(log_path)
     lines = [
         "CanSat Analysis Context",
         f"Source log: {log_path}",
     ]
+    if manifest:
+        lines.extend(
+            [
+                f"Run ID: {manifest.get('run_id', '')}",
+                f"Event: {manifest.get('context', {}).get('event_id', '')}",
+                f"Run kind: {manifest.get('context', {}).get('run_kind', '')}",
+                f"Git commit: {manifest.get('software', {}).get('commit', '')}",
+            ]
+        )
     (out_dir / "analysis_context.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -209,17 +231,7 @@ def write_analysis_context(out_dir: Path, *, log_path: Path) -> None:
 
 
 def prepare_output_dir(log_path: Path) -> Path:
-    log_root = REPO_ROOT / "analysis" / "outputs" / log_path.stem
-    log_root.mkdir(parents=True, exist_ok=True)
-
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = log_root / f"run_{stamp}"
-    suffix = 1
-    while out_dir.exists():
-        suffix += 1
-        out_dir = log_root / f"run_{stamp}_{suffix:02d}"
-    out_dir.mkdir(parents=True, exist_ok=False)
-    return out_dir
+    return create_analysis_output_dir(log_path, "log", REPO_ROOT / "analysis" / "outputs")
 
 
 def _safe_numeric_series(df: pd.DataFrame, col: str) -> pd.Series:
@@ -532,11 +544,14 @@ def write_coverage_reports(df: pd.DataFrame, out_dir: Path) -> dict:
     grouped_set = set(grouped_cols)
     expected_set = set(LOG_HEADER) if LOG_HEADER else set(df.columns)
     actual_set = set(df.columns)
+    legacy_optional_missing = set()
+    if "LogSchemaVersion" not in actual_set:
+        legacy_optional_missing = {"LogSchemaVersion", "RunId"} & expected_set
 
     duplicate_group_cols = sorted({c for c in grouped_cols if grouped_cols.count(c) > 1})
     expected_missing_in_groups = sorted(expected_set - grouped_set)
     grouped_not_in_expected = sorted(grouped_set - expected_set) if LOG_HEADER else []
-    actual_missing_from_csv = sorted(expected_set - actual_set)
+    actual_missing_from_csv = sorted(expected_set - actual_set - legacy_optional_missing)
     actual_extra_in_csv = sorted(actual_set - expected_set) if LOG_HEADER else []
 
     lines = [
@@ -548,6 +563,7 @@ def write_coverage_reports(df: pd.DataFrame, out_dir: Path) -> dict:
         f"Duplicate columns across groups: {duplicate_group_cols or 'None'}",
         f"LOG_HEADER columns missing from groups: {expected_missing_in_groups or 'None'}",
         f"Grouped columns not in LOG_HEADER: {grouped_not_in_expected or 'None'}",
+        f"Legacy-compatible context columns absent: {sorted(legacy_optional_missing) or 'None'}",
         f"LOG_HEADER columns missing from CSV: {actual_missing_from_csv or 'None'}",
         f"CSV columns not in LOG_HEADER: {actual_extra_in_csv or 'None'}",
         "",
@@ -815,7 +831,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "log_path",
         nargs="?",
-        help="Path to robust_log_*.csv. Defaults to interactive selection or latest log.",
+        help="Path to a run directory, mission.csv, or legacy robust_log_*.csv.",
     )
     return parser.parse_args()
 

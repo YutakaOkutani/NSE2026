@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
 
+from mission.paths import DEFAULT_DATA_ROOT
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LOGS_DIR = REPO_ROOT / "analysis" / "robust_logs"
+LEGACY_LOGS_DIR = REPO_ROOT / "analysis" / "robust_logs"
+LOGS_DIR = LEGACY_LOGS_DIR
+RUN_MANIFEST_NAME = "run-manifest.json"
+BUNDLE_LOG_NAME = "mission.csv"
 
 
 def _format_size(size_bytes: int) -> str:
@@ -18,19 +24,53 @@ def _format_size(size_bytes: int) -> str:
 
 
 def get_robust_log_candidates() -> list[Path]:
-    """Return all robust_log_*.csv files in robust_logs directory, sorted by mtime (newest first)."""
-    if not LOGS_DIR.exists():
-        return []
-    candidates = list(LOGS_DIR.rglob("robust_log_*.csv"))
+    """Return new run-bundle logs and legacy robust logs, newest first."""
+    candidates = []
+    if DEFAULT_DATA_ROOT.exists():
+        candidates.extend(DEFAULT_DATA_ROOT.rglob(BUNDLE_LOG_NAME))
+    if LEGACY_LOGS_DIR.exists():
+        candidates.extend(LEGACY_LOGS_DIR.rglob("robust_log_*.csv"))
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates
 
 
+def load_run_manifest(log_path: Path) -> dict[str, object]:
+    manifest_path = Path(log_path).parent / RUN_MANIFEST_NAME
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def is_run_bundle_log(log_path: Path) -> bool:
+    path = Path(log_path)
+    return path.name == BUNDLE_LOG_NAME and (path.parent / RUN_MANIFEST_NAME).is_file()
+
+
+def create_analysis_output_dir(log_path: Path, analyzer: str, legacy_root: Path) -> Path:
+    if is_run_bundle_log(log_path):
+        root = Path(log_path).parent / "analysis" / analyzer
+    else:
+        root = legacy_root / Path(log_path).stem
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = root / f"run_{stamp}"
+    suffix = 1
+    while out_dir.exists():
+        suffix += 1
+        out_dir = root / f"run_{stamp}_{suffix:02d}"
+    out_dir.mkdir(parents=True, exist_ok=False)
+    return out_dir
+
+
 def find_latest_log() -> Path:
-    """Return the newest robust_log_*.csv file path."""
+    """Return the newest run-bundle or legacy mission log path."""
     candidates = get_robust_log_candidates()
     if not candidates:
-        raise FileNotFoundError(f"No robust_log_*.csv found in {LOGS_DIR}")
+        raise FileNotFoundError(
+            f"No mission.csv found in {DEFAULT_DATA_ROOT} and no robust_log_*.csv found in {LEGACY_LOGS_DIR}"
+        )
     return candidates[0]
 
 
@@ -44,13 +84,17 @@ def resolve_log_path(file_path: str | Path | None = None) -> Path:
     """
     if file_path:
         path = Path(file_path).resolve()
+        if path.is_dir():
+            path = path / BUNDLE_LOG_NAME
         if not path.exists():
             raise FileNotFoundError(f"Specified log file not found: {path}")
         return path
 
     candidates = get_robust_log_candidates()
     if not candidates:
-        raise FileNotFoundError(f"No robust_log_*.csv found in {LOGS_DIR}")
+        raise FileNotFoundError(
+            f"No mission.csv found in {DEFAULT_DATA_ROOT} and no robust_log_*.csv found in {LEGACY_LOGS_DIR}"
+        )
 
     # Fallback to latest log in non-interactive environment (e.g. CI, pipe)
     if not sys.stdin.isatty():
@@ -63,7 +107,7 @@ def resolve_log_path(file_path: str | Path | None = None) -> Path:
     width = len(str(total))
 
     print("\n" + "=" * 70)
-    print("  Select a robust log file to analyze")
+    print("  Select a mission log to analyze")
     print("=" * 70)
 
     for i, candidate in enumerate(candidates, start=1):
@@ -71,7 +115,11 @@ def resolve_log_path(file_path: str | Path | None = None) -> Path:
         mtime_str = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         size_str = _format_size(stat.st_size)
         tag = " (Latest)" if i == 1 else ""
-        print(f" [{i:{width}d}] {candidate.name:<45} ({mtime_str}, {size_str}){tag}")
+        try:
+            label = str(candidate.relative_to(DEFAULT_DATA_ROOT))
+        except ValueError:
+            label = candidate.name
+        print(f" [{i:{width}d}] {label:<60} ({mtime_str}, {size_str}){tag}")
 
     print("=" * 70)
 

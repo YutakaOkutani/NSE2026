@@ -7,10 +7,16 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from mission.paths import DEFAULT_TELEMETRY_ROOT
+
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 5001
-DEFAULT_LOG_DIR = "/home/pi/logs_nse2026/telemetry_pc"
+DEFAULT_LOG_DIR = str(DEFAULT_TELEMETRY_ROOT / "pc")
 EXPECTED_SCHEMA = "cansat.telemetry.v1"
 
 

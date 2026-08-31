@@ -49,6 +49,7 @@
 | Mission / Phase responsibilities | ★★★★★ | PARTIAL | ★★★★★ | YES | Prevents responsibility and transition drift |
 | Mission / P2, P3, P4/5 invariants | ★★★★★ | PARTIAL | ★★★★★ | YES | High-risk strategies span multiple modules |
 | Mission / timeout semantics | ★★★★★ | PARTIAL | ★★★★★ | YES | Prevents false-success and re-entry budget errors |
+| Competition provenance | ★★★★ | NO | ★★★★ | YES | Prevents one event's rules and field tuning becoming universal defaults |
 | Hardware / electrical constraint | ★★★★★ | NO | ★★★★★ | YES | Not visible in code; prevents GPIO damage |
 | Hardware / motor and radio constraints | ★★★★★ | PARTIAL | ★★★★★ | YES | Prevents uncontrolled motion and lost recovery |
 | Telemetry / current status and boundary | ★★★★★ | NO | ★★★★★ | YES | Prevents prototype being treated as production control |
@@ -95,6 +96,7 @@
 - Added mission terminal semantics and Phase 2/3/4/5 invariants derived from current code/tests.
 - Added current telemetry integration status so agents do not assume a publisher exists.
 - Added a persistent value audit so future pruning uses the same token-value criterion.
+- Added run-bundle/config-metadata boundaries and an NSE2026 provenance page without restoring runtime profile selection.
 - Reserved `flowchart/` with `.gitkeep` for future diagrams without restoring stale diagram content.
 
 ## Maintenance rule

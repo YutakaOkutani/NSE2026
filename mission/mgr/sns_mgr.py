@@ -70,6 +70,7 @@ from mission.const import (
     GPS_NON_GGA_REOPEN_TIMEOUT,
     GPS_RECONNECT_SLEEP,
     GPS_STABLE_FIX_COUNT,
+    MISSION_LOG_SCHEMA_VERSION,
     PHASES_CAMERA_ACTIVE,
     Phase,
     SONAR_MAX_DISTANCE,
@@ -183,6 +184,8 @@ class SensorManager:
             camera_recovery_elapsed_sec = max(0.0, now - float(camera_recovery_started_at))
 
         return [
+            MISSION_LOG_SCHEMA_VERSION,
+            str(getattr(self, "run_id", "legacy")),
             f"{mission_elapsed_sec:.2f}",
             self._coerce_int(current_data.get("phase", 0)),
             str(getattr(self, "phase0_exit_reason", "")),

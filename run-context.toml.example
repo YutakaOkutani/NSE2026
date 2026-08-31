@@ -1,0 +1,15 @@
+# Copy this file to run-context.toml for each competition, rehearsal, or test.
+# This file is operational metadata, is ignored by Git, and does not change control behavior.
+
+[event]
+id = "nse2026"
+name = "NSE 2026"
+
+[run]
+kind = "competition"
+label = ""
+location = ""
+operator = ""
+tags = []
+notes = ""
+

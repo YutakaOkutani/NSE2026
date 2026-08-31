@@ -18,9 +18,11 @@ Current numeric thresholds, pins, speeds, and budgets are authoritative in `miss
 
 - Load only repository-root `mission.toml` in production.
 - Require `[target]` and `[radio]`; reject missing, malformed, unknown, wrong-type, non-finite, or out-of-range values before hardware initialization.
+- Load optional `run-context.toml` only as behavior-neutral provenance; a missing file resolves to `unclassified/mission`.
 - Keep target coordinates and radio mode out of tracked constants.
 - Ignore legacy target environment variables and reject legacy production CLI arguments.
 - Keep the example target deliberately invalid until an operator edits the local copy.
+- Treat current rule-derived timing, goal-marker, and field assumptions as NSE2026 provenance until another competition explicitly replaces them.
 
 ## Phase responsibilities
 

@@ -43,7 +43,12 @@ except Exception:
     GPS_MIN_SATELLITES = 4
     LOG_PREFIX = "robust_log_"
 
-from analysis.log_selector import find_latest_log, resolve_log_path
+from analysis.log_selector import (
+    create_analysis_output_dir,
+    find_latest_log,
+    load_run_manifest,
+    resolve_log_path,
+)
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -61,10 +66,20 @@ def _safe_numeric_series(df: pd.DataFrame, col: str) -> pd.Series:
 
 
 def write_analysis_context(out_dir: Path, *, log_path: Path) -> None:
+    manifest = load_run_manifest(log_path)
     lines = [
         "CanSat Analysis Context",
         f"Source log: {log_path}",
     ]
+    if manifest:
+        lines.extend(
+            [
+                f"Run ID: {manifest.get('run_id', '')}",
+                f"Event: {manifest.get('context', {}).get('event_id', '')}",
+                f"Run kind: {manifest.get('context', {}).get('run_kind', '')}",
+                f"Git commit: {manifest.get('software', {}).get('commit', '')}",
+            ]
+        )
     (out_dir / "analysis_context.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -95,19 +110,21 @@ def ensure_runtime_dependencies() -> None:
 
 
 def prepare_output_dir(log_path: Path) -> Path:
-    root = REPO_ROOT / "analysis" / "explorer_outputs" / log_path.stem
-    root.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = root / f"run_{stamp}"
-    suffix = 1
-    while out_dir.exists():
-        suffix += 1
-        out_dir = root / f"run_{stamp}_{suffix:02d}"
-    out_dir.mkdir(parents=True, exist_ok=False)
-    return out_dir
+    return create_analysis_output_dir(
+        log_path,
+        "explorer",
+        REPO_ROOT / "analysis" / "explorer_outputs",
+    )
 
 
 def parse_log_start_time(log_path: Path) -> datetime | None:
+    manifest = load_run_manifest(log_path)
+    started_at = manifest.get("started_at")
+    if isinstance(started_at, str):
+        try:
+            return datetime.fromisoformat(started_at)
+        except ValueError:
+            pass
     stem = log_path.stem
     pattern = re.escape(LOG_PREFIX) + r"(?P<dt>\d{4}-\d{4}-\d{6})"
     match = re.search(pattern, stem)
@@ -768,7 +785,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "log_path",
         nargs="?",
-        help="Path to robust_log_*.csv. Defaults to interactive selection or latest log.",
+        help="Path to a run directory, mission.csv, or legacy robust_log_*.csv.",
     )
     parser.add_argument(
         "--camera-dir",
@@ -813,6 +830,10 @@ def analyze_explorer_log(
         grid_size=max(30, int(grid_size)),
     )
     mission_start_dt = parse_log_start_time(log_path)
+    if camera_dir is None:
+        bundled_camera_dir = log_path.parent / "camera"
+        if bundled_camera_dir.is_dir():
+            camera_dir = bundled_camera_dir
     out_dir = prepare_output_dir(log_path)
     write_analysis_context(out_dir, log_path=log_path)
 

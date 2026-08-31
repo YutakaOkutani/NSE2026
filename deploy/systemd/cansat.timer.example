@@ -1,7 +1,8 @@
 [Unit]
-Description=Start CanSat mission 5 minutes after boot
+Description=Start CanSat mission after the configured boot delay
 
 [Timer]
+# Deployment-specific: review this delay for each competition and launch procedure.
 OnBootSec=5min
 Unit=cansat.service
 AccuracySec=1s

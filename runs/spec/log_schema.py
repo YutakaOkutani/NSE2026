@@ -38,6 +38,7 @@ class _LogOnlyController(SensorManager):
         self.st = CanSatState()
         self.target_lat = 0.0
         self.target_lng = 0.0
+        self.run_id = "test-run"
         self.mission_start_time = 100.0
         self.last_motor_command = {}
         self.phase7_arrival_reason = "RUNNING"
@@ -68,6 +69,9 @@ class LogSchemaTest(unittest.TestCase):
 
         self.assertEqual(len(row), len(LOG_HEADER))
         self.assertEqual(len(LOG_HEADER), len(set(LOG_HEADER)))
+        by_name = dict(zip(LOG_HEADER, row))
+        self.assertEqual(by_name["LogSchemaVersion"], 1)
+        self.assertEqual(by_name["RunId"], "test-run")
 
     def test_cone_diagnostics_are_written_with_freshness_and_gate_context(self):
         ctrl = _LogOnlyController()
